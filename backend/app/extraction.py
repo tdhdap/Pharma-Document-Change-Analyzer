@@ -30,18 +30,26 @@ def _extract_pdf(file_path: str) -> list[Paragraph]:
         if not text:
             continue
         page_toc_titles = toc_titles_by_page.get(page_number, set())
-        # Split by double newlines first (paragraph breaks), then by single newlines (lines)
         for para in text.split("\n\n"):
             para = para.strip()
             if not para:
                 continue
-            # For each paragraph block, split by single newlines to get individual lines
-            for chunk in para.split("\n"):
-                chunk = chunk.strip()
-                if chunk:
+            # Check if this block contains a TOC heading mixed with other content
+            lines = [line.strip() for line in para.split("\n") if line.strip()]
+            matched_heading_lines = [line for line in lines if line in page_toc_titles]
+
+            # Only split on single newlines if: a TOC heading exists in this block AND there's mixed content
+            if matched_heading_lines and len(lines) > 1:
+                # Block contains a heading plus other text — split them as separate paragraphs
+                for line in lines:
                     paragraphs.append(
-                        Paragraph(text=chunk, page=page_number, is_heading=chunk in page_toc_titles)
+                        Paragraph(text=line, page=page_number, is_heading=line in page_toc_titles)
                     )
+            else:
+                # Block is either a single item or no TOC match — keep as single paragraph
+                paragraphs.append(
+                    Paragraph(text=para, page=page_number, is_heading=para in page_toc_titles)
+                )
     doc.close()
     return paragraphs
 

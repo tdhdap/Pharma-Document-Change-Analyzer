@@ -82,6 +82,27 @@ def test_extract_pdf_tags_toc_entries_as_headings(tmp_path):
     assert heading_paragraphs[0].text == "5.2 Sample Preparation"
 
 
+def test_extract_pdf_preserves_wrapped_paragraphs_without_toc(tmp_path):
+    """Regression test: wrapped paragraphs (with internal newlines) should remain as single Paragraphs
+    when they don't match a TOC entry. This prevents spurious line-level diffs when paragraphs
+    re-flow differently between document versions (margin/font changes)."""
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page1 = pdf.new_page()
+    # Insert a multi-line block with no TOC entry: should be kept as one paragraph
+    page1.insert_text((72, 72), "This is a long paragraph that\nwraps across multiple lines\nwithout any TOC entry.")
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    # Should be exactly one paragraph (not fragmented into 3 lines)
+    assert len(paragraphs) == 1
+    assert paragraphs[0].page == 1
+    assert paragraphs[0].is_heading is False
+    assert "wraps across multiple lines" in paragraphs[0].text
+
+
 def test_extract_text_rejects_unknown_type(tmp_path):
     file_path = tmp_path / "doc.xyz"
     file_path.write_text("content")

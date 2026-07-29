@@ -2066,6 +2066,29 @@ def test_pipeline_reproduces_the_outline_example(monkeypatch):
     role_change = next(c for c in result.changes if c.change_type == "role_responsibility_change")
     assert role_change.ai_risk_level == "Medium"
     assert "QA Manager" in role_change.reason
+
+
+def test_pending_change_never_leaks_when_llm_response_omits_it(monkeypatch):
+    old_paragraphs = [
+        Paragraph(text="The Quality Control Manager shall approve the result."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="The Quality Assurance Manager shall approve the result."),
+    ]
+
+    def fake_classify_returns_nothing(unresolved):
+        return []  # simulates a partial/malformed Gemini response that omits this item
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fake_classify_returns_nothing)
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    assert result.summary.total_changes == 1
+    change = result.changes[0]
+    assert change.change_type == "unclassified"
+    assert change.change_type != "pending_llm_classification"
+    assert change.ai_risk_level == "Medium"
+    assert change.confidence == 0.0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2176,12 +2199,21 @@ def compare_documents(
         ])
         by_id = {cl.change_id: cl for cl in classifications}
         for c in changes:
+            if c.change_type != "pending_llm_classification":
+                continue
             cl = by_id.get(c.change_id)
             if cl:
                 c.change_type = cl.change_type
                 c.reason = cl.reason
                 c.confidence = cl.confidence
                 c.ai_risk_level = risk_rules.assign_risk(cl.change_type)
+            else:
+                # The batch response didn't cover this change (partial/malformed
+                # output) — never let the internal placeholder leak into the report.
+                c.change_type = "unclassified"
+                c.reason = "Automatic classification unavailable — needs manual review."
+                c.confidence = 0.0
+                c.ai_risk_level = risk_rules.assign_risk("unclassified")
 
     return ComparisonResult(
         comparison_id=str(uuid.uuid4()), old_document=old_filename, new_document=new_filename,
@@ -2192,7 +2224,7 @@ def compare_documents(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_pipeline.py -v`
-Expected: PASS (1 test) — downloads the embedding model on first run if not already cached.
+Expected: PASS (2 tests) — downloads the embedding model on first run if not already cached.
 
 - [ ] **Step 5: Commit**
 

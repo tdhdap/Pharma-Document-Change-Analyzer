@@ -12,3 +12,11 @@ def filter_changes(
     if change_type:
         result = [c for c in result if c["change_type"] == change_type]
     return result
+
+
+def build_change_update_payload(edited_row: dict, original_row: dict) -> dict:
+    payload = {}
+    for field in ("reviewer_risk_level", "reviewer_comment", "accepted"):
+        if edited_row.get(field) != original_row.get(field):
+            payload[field] = edited_row.get(field)
+    return payload

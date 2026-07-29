@@ -1,4 +1,4 @@
-from logic import filter_changes
+from logic import filter_changes, build_change_update_payload
 
 CHANGES = [
     {"change_id": "1", "section": "Acceptance Criteria", "change_type": "numeric_change", "ai_risk_level": "High", "reviewer_risk_level": None},
@@ -29,3 +29,17 @@ def test_filter_by_change_type():
 def test_combined_filters():
     result = filter_changes(CHANGES, "High", "Storage Conditions", "unit_change")
     assert [c["change_id"] for c in result] == ["2"]
+
+
+def test_build_change_update_payload_includes_only_changed_fields():
+    original = {"reviewer_risk_level": None, "reviewer_comment": None, "accepted": False}
+    edited = {"reviewer_risk_level": "Low", "reviewer_comment": None, "accepted": True}
+
+    payload = build_change_update_payload(edited, original)
+
+    assert payload == {"reviewer_risk_level": "Low", "accepted": True}
+
+
+def test_build_change_update_payload_is_empty_when_nothing_changed():
+    row = {"reviewer_risk_level": "Low", "reviewer_comment": "ok", "accepted": True}
+    assert build_change_update_payload(row, row) == {}

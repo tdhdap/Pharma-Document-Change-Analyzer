@@ -2,6 +2,9 @@ import streamlit as st
 
 from api_client import update_change, export_comparison
 from logic import build_change_update_payload
+from bootstrap import ensure_backend_running
+
+ensure_backend_running()
 
 st.title("Review & Export")
 
@@ -52,10 +55,9 @@ else:
     st.divider()
     st.subheader("Export")
     export_format = st.radio("Format", ["json", "csv"], horizontal=True)
-    if st.button("Download report"):
-        content = export_comparison(comparison["comparison_id"], export_format)
-        st.download_button(
-            "Save file",
-            data=content,
-            file_name=f"comparison_{comparison['comparison_id']}.{export_format}",
-        )
+    content = export_comparison(comparison["comparison_id"], export_format)
+    st.download_button(
+        "Download report",
+        data=content,
+        file_name=f"comparison_{comparison['comparison_id']}.{export_format}",
+    )

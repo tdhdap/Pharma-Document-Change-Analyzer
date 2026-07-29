@@ -1,5 +1,9 @@
 import streamlit as st
 
+from bootstrap import ensure_backend_running
+
+ensure_backend_running()
+
 st.title("Change Summary")
 
 comparison = st.session_state.get("comparison")

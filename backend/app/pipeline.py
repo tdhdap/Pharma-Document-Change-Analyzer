@@ -98,12 +98,21 @@ def compare_documents(
         ])
         by_id = {cl.change_id: cl for cl in classifications}
         for c in changes:
+            if c.change_type != "pending_llm_classification":
+                continue
             cl = by_id.get(c.change_id)
             if cl:
                 c.change_type = cl.change_type
                 c.reason = cl.reason
                 c.confidence = cl.confidence
                 c.ai_risk_level = risk_rules.assign_risk(cl.change_type)
+            else:
+                # The batch response didn't cover this change (partial/malformed
+                # output) — never let the internal placeholder leak into the report.
+                c.change_type = "unclassified"
+                c.reason = "Automatic classification unavailable — needs manual review."
+                c.confidence = 0.0
+                c.ai_risk_level = risk_rules.assign_risk("unclassified")
 
     return ComparisonResult(
         comparison_id=str(uuid.uuid4()), old_document=old_filename, new_document=new_filename,

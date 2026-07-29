@@ -90,6 +90,7 @@ def test_paragraph_defaults():
     assert p.text == "hello"
     assert p.page is None
     assert p.paragraph_index is None
+    assert p.is_heading is False
 
 
 def test_section_holds_paragraphs():
@@ -141,6 +142,7 @@ class Paragraph:
     text: str
     page: Optional[int] = None
     paragraph_index: Optional[int] = None
+    is_heading: bool = False
 
 
 @dataclass
@@ -315,14 +317,14 @@ git commit -m "feat: backend scaffold with config, domain models, health check"
 - Test: `backend/tests/test_extraction.py`
 
 **Interfaces:**
-- Consumes: `app.models.Paragraph`
-- Produces: `app.extraction.extract_text(file_path: str, file_type: str) -> list[Paragraph]` (`file_type` is one of `"pdf"`, `"docx"`, `"txt"`) — used by `main.py` (Task 13) and `pipeline.py` (Task 12).
+- Consumes: `app.models.Paragraph` (including its `is_heading: bool = False` field)
+- Produces: `app.extraction.extract_text(file_path: str, file_type: str) -> list[Paragraph]` (`file_type` is one of `"pdf"`, `"docx"`, `"txt"`) — used by `main.py` (Task 13) and `pipeline.py` (Task 12). Paragraphs are tagged `is_heading=True` when the source format carries a real structural signal: DOCX paragraphs styled `"Heading *"`/`"Title"`, or PDF paragraphs that match an entry in the PDF's embedded table of contents (`doc.get_toc()`). TXT never sets it (plain text carries no structure) — `sectioning.py` (Task 3) falls back to a text-pattern heuristic when no paragraph in a document is tagged.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # backend/tests/test_extraction.py
-import fitz  # PyMuPDF, used here only to build a test fixture
+import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
 
 from app.extraction import extract_text
@@ -340,6 +342,7 @@ def test_extract_txt_splits_on_blank_lines(tmp_path):
     assert paragraphs[0].paragraph_index == 0
     assert paragraphs[2].paragraph_index == 2
     assert all(p.page is None for p in paragraphs)
+    assert all(p.is_heading is False for p in paragraphs)
 
 
 def test_extract_docx_reads_paragraphs(tmp_path):
@@ -357,6 +360,20 @@ def test_extract_docx_reads_paragraphs(tmp_path):
     assert paragraphs[1].paragraph_index == 1
 
 
+def test_extract_docx_tags_heading_style_paragraphs(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("5.2 Sample Preparation", style="Heading 1")
+    doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert paragraphs[0].text == "5.2 Sample Preparation"
+    assert paragraphs[0].is_heading is True
+    assert paragraphs[1].is_heading is False
+
+
 def test_extract_pdf_tags_page_numbers(tmp_path):
     file_path = tmp_path / "doc.pdf"
     pdf = fitz.open()
@@ -371,6 +388,24 @@ def test_extract_pdf_tags_page_numbers(tmp_path):
 
     assert any(p.page == 1 and "Page one text." in p.text for p in paragraphs)
     assert any(p.page == 2 and "Page two text." in p.text for p in paragraphs)
+    assert all(p.is_heading is False for p in paragraphs)
+
+
+def test_extract_pdf_tags_toc_entries_as_headings(tmp_path):
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page1 = pdf.new_page()
+    page1.insert_text((72, 72), "5.2 Sample Preparation")
+    page1.insert_text((72, 100), "10 mg of sample was weighed and diluted.")
+    pdf.set_toc([[1, "5.2 Sample Preparation", 1]])
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    heading_paragraphs = [p for p in paragraphs if p.is_heading]
+    assert len(heading_paragraphs) == 1
+    assert heading_paragraphs[0].text == "5.2 Sample Preparation"
 
 
 def test_extract_text_rejects_unknown_type(tmp_path):
@@ -397,6 +432,8 @@ from docx import Document as DocxDocument
 
 from app.models import Paragraph
 
+HEADING_STYLE_PREFIXES = ("Heading", "Title")
+
 
 def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
     if file_type == "pdf":
@@ -411,14 +448,23 @@ def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
 def _extract_pdf(file_path: str) -> list[Paragraph]:
     paragraphs: list[Paragraph] = []
     doc = fitz.open(file_path)
+
+    toc_titles_by_page: dict[int, set[str]] = {}
+    for _level, title, page_number in doc.get_toc():
+        toc_titles_by_page.setdefault(page_number, set()).add(title.strip())
+
     for page_index, page in enumerate(doc):
+        page_number = page_index + 1
         text = page.get_text().strip()
         if not text:
             continue
+        page_toc_titles = toc_titles_by_page.get(page_number, set())
         for chunk in text.split("\n\n"):
             chunk = chunk.strip()
             if chunk:
-                paragraphs.append(Paragraph(text=chunk, page=page_index + 1))
+                paragraphs.append(
+                    Paragraph(text=chunk, page=page_number, is_heading=chunk in page_toc_titles)
+                )
     doc.close()
     return paragraphs
 
@@ -431,7 +477,9 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
         text = para.text.strip()
         if not text:
             continue
-        paragraphs.append(Paragraph(text=text, paragraph_index=index))
+        style_name = para.style.name if para.style else ""
+        is_heading = style_name.startswith(HEADING_STYLE_PREFIXES)
+        paragraphs.append(Paragraph(text=text, paragraph_index=index, is_heading=is_heading))
         index += 1
     return paragraphs
 
@@ -450,7 +498,7 @@ def _extract_txt(file_path: str) -> list[Paragraph]:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_extraction.py -v`
-Expected: PASS (4 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -468,8 +516,13 @@ git commit -m "feat: text extraction for PDF, DOCX, and TXT"
 - Test: `backend/tests/test_sectioning.py`
 
 **Interfaces:**
-- Consumes: `app.models.Paragraph`, `Section`
+- Consumes: `app.models.Paragraph` (including `is_heading`), `Section`
 - Produces: `app.sectioning.split_into_sections(paragraphs: list[Paragraph]) -> list[Section]` — used by `pipeline.py` (Task 12).
+
+**Design note:** heading detection is layered, preferring real structural signals over guessing from text:
+1. If any paragraph in the document has `is_heading=True` (set by the extractor from DOCX heading styles or a PDF's embedded table of contents — see Task 2), those paragraphs are the section boundaries.
+2. Otherwise (TXT, or a PDF/DOCX with no structural markup), fall back to a text-pattern heuristic: a line matches only if it has multi-level numbering like `5.2` (not a bare number like `10`), is reasonably short, and does not end in sentence punctuation — this avoids misclassifying ordinary body sentences that start with a quantity (e.g. "10 mg of sample was weighed and diluted.") as headings, which a naive "starts with a number" rule would.
+3. If neither layer finds anything, fall back to one section per paragraph (as before).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -494,6 +547,42 @@ def test_splits_on_numbered_headings():
     assert [p.text for p in sections[0].paragraphs] == ["Weigh 10 mg of sample."]
     assert sections[1].heading == "5.3 Sample Analysis"
     assert [p.text for p in sections[1].paragraphs] == ["Inject into the HPLC system."]
+
+
+def test_does_not_misdetect_numeral_leading_body_text_as_heading():
+    paragraphs = [
+        Paragraph(text="5.2 Sample Preparation"),
+        Paragraph(text="10 mg of sample was weighed and diluted."),
+        Paragraph(text="2 hours later, the reaction was stopped."),
+        Paragraph(text="5.3 Sample Analysis"),
+        Paragraph(text="1234 units were tested."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "5.2 Sample Preparation"
+    assert [p.text for p in sections[0].paragraphs] == [
+        "10 mg of sample was weighed and diluted.",
+        "2 hours later, the reaction was stopped.",
+    ]
+    assert sections[1].heading == "5.3 Sample Analysis"
+    assert [p.text for p in sections[1].paragraphs] == ["1234 units were tested."]
+
+
+def test_prefers_is_heading_flag_over_text_pattern():
+    paragraphs = [
+        Paragraph(text="Sample Preparation", is_heading=True),
+        Paragraph(text="Weigh 10 mg of sample."),
+        Paragraph(text="Sample Analysis", is_heading=True),
+        Paragraph(text="Inject into the HPLC system."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "Sample Preparation"
+    assert sections[1].heading == "Sample Analysis"
 
 
 def test_paragraphs_before_first_heading_become_preamble():
@@ -539,16 +628,28 @@ import re
 
 from app.models import Paragraph, Section
 
-HEADING_PATTERN = re.compile(r"^\s*\d+(\.\d+)*\s+\S.*$")
+HEADING_NUMBER_PATTERN = re.compile(r"^\s*\d+(\.\d+)+\s+\S.*$")
 MAX_HEADING_LENGTH = 120
+MAX_HEADING_WORDS = 12
+
+
+def _looks_like_heading(text: str) -> bool:
+    if not HEADING_NUMBER_PATTERN.match(text):
+        return False
+    if len(text) > MAX_HEADING_LENGTH:
+        return False
+    if len(text.split()) > MAX_HEADING_WORDS:
+        return False
+    if text.rstrip().endswith((".", ",", ";")):
+        return False
+    return True
 
 
 def split_into_sections(paragraphs: list[Paragraph]) -> list[Section]:
-    heading_indices = [
-        i
-        for i, p in enumerate(paragraphs)
-        if HEADING_PATTERN.match(p.text) and len(p.text) <= MAX_HEADING_LENGTH
-    ]
+    heading_indices = [i for i, p in enumerate(paragraphs) if p.is_heading]
+
+    if not heading_indices:
+        heading_indices = [i for i, p in enumerate(paragraphs) if _looks_like_heading(p.text)]
 
     if not heading_indices:
         return [
@@ -572,7 +673,7 @@ def split_into_sections(paragraphs: list[Paragraph]) -> list[Section]:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_sectioning.py -v`
-Expected: PASS (3 tests)
+Expected: PASS (5 tests)
 
 - [ ] **Step 5: Commit**
 

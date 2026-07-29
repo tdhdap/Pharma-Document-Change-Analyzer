@@ -73,6 +73,7 @@ def test_update_change_sets_reviewer_fields():
     fetched = repository.get_comparison(conn, "cmp-1")
     assert fetched.changes[0].reviewer_risk_level == "Low"
     assert fetched.changes[0].accepted is True
+    assert fetched.changes[0].ai_risk_level == "High"
 
 
 def test_update_change_returns_none_when_missing():

@@ -87,3 +87,21 @@ def test_compare_returns_404_for_unknown_document(tmp_path, monkeypatch):
     setup_isolated_storage(tmp_path, monkeypatch)
     response = client.post("/compare", json={"old_document_id": "missing-1", "new_document_id": "missing-2"})
     assert response.status_code == 404
+
+
+def test_get_comparison_returns_404_for_unknown_id(tmp_path, monkeypatch):
+    setup_isolated_storage(tmp_path, monkeypatch)
+    response = client.get("/comparisons/missing-1")
+    assert response.status_code == 404
+
+
+def test_patch_change_returns_404_for_unknown_id(tmp_path, monkeypatch):
+    setup_isolated_storage(tmp_path, monkeypatch)
+    response = client.patch("/changes/missing-1", json={"reviewer_risk_level": "Low"})
+    assert response.status_code == 404
+
+
+def test_export_comparison_returns_404_for_unknown_id(tmp_path, monkeypatch):
+    setup_isolated_storage(tmp_path, monkeypatch)
+    response = client.get("/comparisons/missing-1/export", params={"format": "csv"})
+    assert response.status_code == 404

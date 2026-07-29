@@ -1,3 +1,3 @@
-streamlit==1.38.0
+streamlit==1.60.0  # 1.38.0 lacks a prebuilt wheel for Python 3.14; 1.60.0 is what's actually verified working here
 requests==2.32.3
 pytest==8.3.3

@@ -42,9 +42,9 @@
 - [ ] **Step 1: Write `backend/requirements.txt`**
 
 ```
-fastapi==0.115.0
+fastapi==0.136.3  # 0.115.0 requires starlette<0.39, conflicting with streamlit 1.60.0's starlette>=0.40 (Streamlit Cloud deployment installs both)
 uvicorn[standard]==0.30.6
-python-multipart==0.0.9
+python-multipart==0.0.27  # 0.0.9 conflicts with streamlit 1.60.0's python-multipart>=0.0.10 requirement
 httpx==0.27.2
 pymupdf==1.24.10
 python-docx==1.1.2

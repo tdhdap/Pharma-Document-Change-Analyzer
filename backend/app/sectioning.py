@@ -2,16 +2,28 @@ import re
 
 from app.models import Paragraph, Section
 
-HEADING_PATTERN = re.compile(r"^\s*\d+(\.\d+)*\s+\S.*$")
+HEADING_NUMBER_PATTERN = re.compile(r"^\s*\d+(\.\d+)+\s+\S.*$")
 MAX_HEADING_LENGTH = 120
+MAX_HEADING_WORDS = 12
+
+
+def _looks_like_heading(text: str) -> bool:
+    if not HEADING_NUMBER_PATTERN.match(text):
+        return False
+    if len(text) > MAX_HEADING_LENGTH:
+        return False
+    if len(text.split()) > MAX_HEADING_WORDS:
+        return False
+    if text.rstrip().endswith((".", ",", ";")):
+        return False
+    return True
 
 
 def split_into_sections(paragraphs: list[Paragraph]) -> list[Section]:
-    heading_indices = [
-        i
-        for i, p in enumerate(paragraphs)
-        if HEADING_PATTERN.match(p.text) and len(p.text) <= MAX_HEADING_LENGTH
-    ]
+    heading_indices = [i for i, p in enumerate(paragraphs) if p.is_heading]
+
+    if not heading_indices:
+        heading_indices = [i for i, p in enumerate(paragraphs) if _looks_like_heading(p.text)]
 
     if not heading_indices:
         return [

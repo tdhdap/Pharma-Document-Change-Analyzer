@@ -19,6 +19,42 @@ def test_splits_on_numbered_headings():
     assert [p.text for p in sections[1].paragraphs] == ["Inject into the HPLC system."]
 
 
+def test_does_not_misdetect_numeral_leading_body_text_as_heading():
+    paragraphs = [
+        Paragraph(text="5.2 Sample Preparation"),
+        Paragraph(text="10 mg of sample was weighed and diluted."),
+        Paragraph(text="2 hours later, the reaction was stopped."),
+        Paragraph(text="5.3 Sample Analysis"),
+        Paragraph(text="1234 units were tested."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "5.2 Sample Preparation"
+    assert [p.text for p in sections[0].paragraphs] == [
+        "10 mg of sample was weighed and diluted.",
+        "2 hours later, the reaction was stopped.",
+    ]
+    assert sections[1].heading == "5.3 Sample Analysis"
+    assert [p.text for p in sections[1].paragraphs] == ["1234 units were tested."]
+
+
+def test_prefers_is_heading_flag_over_text_pattern():
+    paragraphs = [
+        Paragraph(text="Sample Preparation", is_heading=True),
+        Paragraph(text="Weigh 10 mg of sample."),
+        Paragraph(text="Sample Analysis", is_heading=True),
+        Paragraph(text="Inject into the HPLC system."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "Sample Preparation"
+    assert sections[1].heading == "Sample Analysis"
+
+
 def test_paragraphs_before_first_heading_become_preamble():
     paragraphs = [
         Paragraph(text="This document describes the sampling procedure."),

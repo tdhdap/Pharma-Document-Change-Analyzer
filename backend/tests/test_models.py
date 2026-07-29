@@ -11,6 +11,7 @@ def test_paragraph_defaults():
     assert p.text == "hello"
     assert p.page is None
     assert p.paragraph_index is None
+    assert p.is_heading is False
 
 
 def test_section_holds_paragraphs():

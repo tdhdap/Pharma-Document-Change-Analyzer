@@ -1,4 +1,4 @@
-from app.regex_detectors import detect_regex_change
+from app.regex_detectors import detect_regex_change, _extract_numbers
 
 
 def test_numeric_change_when_only_numbers_differ():
@@ -32,3 +32,20 @@ def test_no_detection_when_text_has_no_numbers_units_or_dates():
         "The Quality Assurance Manager shall approve the result.",
     )
     assert result is None
+
+
+def test_numeric_change_does_not_absorb_trailing_sentence_period():
+    result = detect_regex_change(
+        "This procedure is effective from 2024-01-15.",
+        "This procedure is effective from 2024-03-20.",
+    )
+    assert result is not None
+    assert result.change_type == "numeric_change"
+
+
+def test_extract_numbers_excludes_a_bare_trailing_period():
+    # The sentence-ending period right after "15" must not be absorbed into
+    # the number - previously "-?\d+\.?\d*" would greedily consume it.
+    assert _extract_numbers("Effective from 2024-01-15.") == ["2024", "-01", "-15"]
+    # A real decimal point followed by digits must still parse correctly.
+    assert _extract_numbers("Assay range: 95.0% to 105.0%.") == ["95.0", "105.0"]

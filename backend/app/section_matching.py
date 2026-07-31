@@ -16,7 +16,7 @@ def match_sections(
     old_sections: list[Section],
     new_sections: list[Section],
     embed_fn: Callable[[list[str]], np.ndarray] = embed_texts,
-    threshold: float = 0.5,
+    threshold: float = 0.6,
 ) -> SectionMatchResult:
     if not old_sections or not new_sections:
         return SectionMatchResult(

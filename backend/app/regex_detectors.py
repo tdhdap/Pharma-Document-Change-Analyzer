@@ -2,7 +2,7 @@ import re
 
 from app.models import RegexDetection
 
-NUMBER_PATTERN = re.compile(r"-?\d+\.?\d*")
+NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 UNIT_PATTERN = re.compile(r"\d+\.?\d*\s*(%|°C|°F|mL|L|mg|kg|g|min|hr|h|RH)")
 DATE_PATTERN = re.compile(
     r"\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b",

@@ -1,3 +1,5 @@
+import collections
+
 import fitz
 from docx import Document as DocxDocument
 
@@ -8,6 +10,28 @@ HEADING_STYLE_PREFIXES = ("Heading", "Title")
 
 DOCX_DEFAULT_BODY_SIZE_PT = 11.0
 DOCX_HEADING_SIZE_DELTA_PT = 2.0
+
+PDF_HEADING_SIZE_DELTA_PT = 2.0
+
+
+def _pdf_block_text(block: dict) -> str:
+    line_texts = []
+    for line in block["lines"]:
+        line_texts.append("".join(span["text"] for span in line["spans"]))
+    return " ".join(line_texts).strip()
+
+
+def _pdf_block_size(block: dict) -> float | None:
+    for line in block["lines"]:
+        for span in line["spans"]:
+            return span["size"]
+    return None
+
+
+def _pdf_body_baseline_pt(sizes: list[float]) -> float | None:
+    if not sizes:
+        return None
+    return collections.Counter(sizes).most_common(1)[0][0]
 
 
 def _docx_paragraph_font_size_pt(para) -> float | None:
@@ -36,40 +60,39 @@ def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
 
 
 def _extract_pdf(file_path: str) -> list[Paragraph]:
-    paragraphs: list[Paragraph] = []
     doc = fitz.open(file_path)
 
     toc_titles_by_page: dict[int, set[str]] = {}
     for _level, title, page_number in doc.get_toc():
         toc_titles_by_page.setdefault(page_number, set()).add(title.strip())
 
+    raw_blocks: list[tuple[str, int, float | None]] = []
     for page_index, page in enumerate(doc):
         page_number = page_index + 1
-        text = page.get_text().strip()
-        if not text:
-            continue
-        page_toc_titles = toc_titles_by_page.get(page_number, set())
-        for para in text.split("\n\n"):
-            para = para.strip()
-            if not para:
+        page_dict = page.get_text("dict")
+        for block in page_dict["blocks"]:
+            if "lines" not in block:
                 continue
-            # Check if this block contains a TOC heading mixed with other content
-            lines = [line.strip() for line in para.split("\n") if line.strip()]
-            matched_heading_lines = [line for line in lines if line in page_toc_titles]
-
-            # Only split on single newlines if: a TOC heading exists in this block AND there's mixed content
-            if matched_heading_lines and len(lines) > 1:
-                # Block contains a heading plus other text — split them as separate paragraphs
-                for line in lines:
-                    paragraphs.append(
-                        Paragraph(text=line, page=page_number, is_heading=line in page_toc_titles)
-                    )
-            else:
-                # Block is either a single item or no TOC match — keep as single paragraph
-                paragraphs.append(
-                    Paragraph(text=para, page=page_number, is_heading=para in page_toc_titles)
-                )
+            block_text = _pdf_block_text(block)
+            if block_text:
+                raw_blocks.append((block_text, page_number, _pdf_block_size(block)))
     doc.close()
+
+    baseline_pt = _pdf_body_baseline_pt([size for _, _, size in raw_blocks if size is not None])
+
+    paragraphs: list[Paragraph] = []
+    for text, page_number, size in raw_blocks:
+        page_toc_titles = toc_titles_by_page.get(page_number, set())
+        is_heading_toc = text in page_toc_titles
+        is_heading_size = (
+            baseline_pt is not None
+            and size is not None
+            and size >= baseline_pt + PDF_HEADING_SIZE_DELTA_PT
+            and _looks_like_heading_shape(text)
+        )
+        paragraphs.append(
+            Paragraph(text=text, page=page_number, is_heading=is_heading_toc or is_heading_size)
+        )
     return paragraphs
 
 

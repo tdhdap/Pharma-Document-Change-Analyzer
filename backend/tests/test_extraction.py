@@ -104,6 +104,78 @@ def test_extract_pdf_preserves_wrapped_paragraphs_without_toc(tmp_path):
     assert "wraps across multiple lines" in paragraphs[0].text
 
 
+def test_extract_pdf_tags_font_size_only_heading(tmp_path):
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "1.0 Scope", fontsize=11)
+    page.insert_text((72, 100), "This procedure applies to all testing in the QC lab.", fontsize=11)
+    page.insert_text((72, 140), "Sample Preparation", fontsize=18)
+    page.insert_text((72, 165), "Weigh 10 mg of sample and dilute to volume with mobile phase.", fontsize=11)
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    # "1.0 Scope" is deliberately the same 11pt size as the body text around it (a
+    # heading-shaped distractor at body size); only "Sample Preparation" at 18pt
+    # clears the baseline+2.0pt threshold and should be flagged.
+    heading_texts = {p.text for p in paragraphs if p.is_heading}
+    assert heading_texts == {"Sample Preparation"}
+
+
+def test_extract_pdf_does_not_flag_normal_body_text_as_heading(tmp_path):
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "This is a completely normal sentence with no special formatting.", fontsize=11)
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    assert all(not p.is_heading for p in paragraphs)
+
+
+def test_extract_pdf_does_not_flag_size_below_threshold_as_heading(tmp_path):
+    """A short, heading-shaped line whose size is only +1.0pt above the body baseline
+    (below the +2.0pt threshold) must not be flagged as a heading."""
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Weigh 10 mg of sample and dilute to volume with mobile phase.", fontsize=11)
+    page.insert_text((72, 100), "Sample Preparation", fontsize=12)
+    page.insert_text((72, 130), "Inject into the HPLC system for analysis.", fontsize=11)
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    assert all(not p.is_heading for p in paragraphs)
+
+
+def test_extract_pdf_does_not_flag_large_font_long_text_as_heading(tmp_path):
+    """A large-font block whose text fails the heading shape guard (a long sentence
+    ending in a period) must not be flagged as a heading, even though its size clears
+    the threshold."""
+    file_path = tmp_path / "doc.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Weigh 10 mg of sample and dilute to volume with mobile phase.", fontsize=11)
+    page.insert_text(
+        (72, 110),
+        "This is a long sentence with a large font size but it ends with a period.",
+        fontsize=18,
+    )
+    page.insert_text((72, 150), "Inject into the HPLC system for analysis.", fontsize=11)
+    pdf.save(str(file_path))
+    pdf.close()
+
+    paragraphs = extract_text(str(file_path), "pdf")
+
+    assert all(not p.is_heading for p in paragraphs)
+
+
 def test_extract_text_rejects_unknown_type(tmp_path):
     file_path = tmp_path / "doc.xyz"
     file_path.write_text("content")

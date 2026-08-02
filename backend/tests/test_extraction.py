@@ -36,9 +36,14 @@ def test_extract_docx_reads_paragraphs(tmp_path):
 
 
 def test_extract_docx_tags_heading_style_paragraphs(tmp_path):
+    """Isolates the structural "Heading 1" style signal: the run's font size is pinned
+    to the body baseline (11pt) so the font-size signal cannot also fire here, ensuring
+    this test actually discriminates the HEADING_STYLE_PREFIXES check from the size check."""
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
-    doc.add_paragraph("5.2 Sample Preparation", style="Heading 1")
+    para = doc.add_paragraph(style="Heading 1")
+    run = para.add_run("5.2 Sample Preparation")
+    run.font.size = Pt(11)
     doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
     doc.save(str(file_path))
 
@@ -221,6 +226,30 @@ def test_extract_docx_does_not_flag_size_below_threshold_as_heading(tmp_path):
     assert len(paragraphs) == 1
     assert paragraphs[0].text == "Sample Preparation"
     assert paragraphs[0].is_heading is False  # Should NOT be flagged (size 12 < threshold 13)
+
+
+def test_extract_docx_uses_resolved_normal_style_size_as_baseline(tmp_path):
+    """When the document's "Normal" style resolves a concrete font size, the baseline
+    must be that resolved size (not the hardcoded 11.0pt fallback). Here Normal is set
+    to 14pt, so +1pt (15pt) is below the +2.0pt threshold and must NOT be flagged, while
+    +2pt (16pt) is at the threshold and MUST be flagged."""
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.styles["Normal"].font.size = Pt(14)
+
+    p_below = doc.add_paragraph()
+    p_below.add_run("Sample Preparation").font.size = Pt(15)
+
+    p_at = doc.add_paragraph()
+    p_at.add_run("Sample Analysis").font.size = Pt(16)
+
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    by_text = {p.text: p.is_heading for p in paragraphs}
+    assert by_text["Sample Preparation"] is False
+    assert by_text["Sample Analysis"] is True
 
 
 def test_extract_docx_does_not_flag_large_font_long_text_as_heading(tmp_path):

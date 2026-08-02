@@ -28,6 +28,14 @@ def _pdf_block_size(block: dict) -> float | None:
     return None
 
 
+# NOTE: DOCX and PDF deliberately use different baseline strategies below - this is not
+# an inconsistency to "unify". PDF spans always report a concrete rendered size, so the
+# mode (most common size) reliably identifies body text. DOCX body text usually resolves
+# to a font size of None at both the run and style level (python-docx does not expose
+# Word's true docDefaults), so a mode-based baseline over DOCX sizes would skew toward
+# whichever heading size happens to be most common instead of the actual body size.
+# DOCX therefore prefers the resolved "Normal" style size when available, and otherwise
+# falls back to 11.0pt - Word's standard default, a documented assumption, not a measurement.
 def _pdf_body_baseline_pt(sizes: list[float]) -> float | None:
     if not sizes:
         return None

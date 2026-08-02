@@ -2,8 +2,27 @@ import fitz
 from docx import Document as DocxDocument
 
 from app.models import Paragraph
+from app.sectioning import _looks_like_heading_shape
 
 HEADING_STYLE_PREFIXES = ("Heading", "Title")
+
+DOCX_DEFAULT_BODY_SIZE_PT = 11.0
+DOCX_HEADING_SIZE_DELTA_PT = 2.0
+
+
+def _docx_paragraph_font_size_pt(para) -> float | None:
+    if para.runs and para.runs[0].font.size is not None:
+        return para.runs[0].font.size.pt
+    if para.style and para.style.font.size is not None:
+        return para.style.font.size.pt
+    return None
+
+
+def _docx_body_baseline_pt(doc) -> float:
+    normal_size = doc.styles["Normal"].font.size
+    if normal_size is not None:
+        return normal_size.pt
+    return DOCX_DEFAULT_BODY_SIZE_PT
 
 
 def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
@@ -56,6 +75,8 @@ def _extract_pdf(file_path: str) -> list[Paragraph]:
 
 def _extract_docx(file_path: str) -> list[Paragraph]:
     doc = DocxDocument(file_path)
+    baseline_pt = _docx_body_baseline_pt(doc)
+
     paragraphs: list[Paragraph] = []
     index = 0
     for para in doc.paragraphs:
@@ -63,8 +84,22 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
         if not text:
             continue
         style_name = para.style.name if para.style else ""
-        is_heading = style_name.startswith(HEADING_STYLE_PREFIXES)
-        paragraphs.append(Paragraph(text=text, paragraph_index=index, is_heading=is_heading))
+        is_heading_style = style_name.startswith(HEADING_STYLE_PREFIXES)
+
+        size_pt = _docx_paragraph_font_size_pt(para)
+        is_heading_size = (
+            size_pt is not None
+            and size_pt >= baseline_pt + DOCX_HEADING_SIZE_DELTA_PT
+            and _looks_like_heading_shape(text)
+        )
+
+        paragraphs.append(
+            Paragraph(
+                text=text,
+                paragraph_index=index,
+                is_heading=is_heading_style or is_heading_size,
+            )
+        )
         index += 1
     return paragraphs
 

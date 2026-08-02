@@ -1,5 +1,6 @@
 import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
+from docx.shared import Pt
 
 from app.extraction import extract_text
 
@@ -112,3 +113,32 @@ def test_extract_text_rejects_unknown_type(tmp_path):
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_extract_docx_tags_font_size_only_heading(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
+    p = doc.add_paragraph()
+    run = p.add_run("Sample Preparation")
+    run.bold = True
+    run.font.size = Pt(16)
+    doc.add_paragraph("Inject into the HPLC system.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    heading_paragraphs = [p for p in paragraphs if p.is_heading]
+    assert len(heading_paragraphs) == 1
+    assert heading_paragraphs[0].text == "Sample Preparation"
+
+
+def test_extract_docx_does_not_flag_normal_body_text_as_heading(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("This is a completely normal paragraph with no special formatting at all.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert all(not p.is_heading for p in paragraphs)

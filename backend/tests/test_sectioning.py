@@ -84,3 +84,46 @@ def test_no_headings_falls_back_to_one_section_per_paragraph():
     assert sections[0].heading == "Paragraph 1"
     assert sections[0].paragraphs == [paragraphs[0]]
     assert sections[2].heading == "Paragraph 3"
+
+
+def test_structural_signal_does_not_block_numbered_pattern_elsewhere():
+    paragraphs = [
+        Paragraph(text="Introduction", is_heading=True),
+        Paragraph(text="This document describes the procedure."),
+        Paragraph(text="5.2 Sample Preparation"),
+        Paragraph(text="Weigh 10 mg of sample."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "Introduction"
+    assert sections[1].heading == "5.2 Sample Preparation"
+
+
+def test_all_caps_heading_without_numbering_is_detected():
+    paragraphs = [
+        Paragraph(text="SCOPE"),
+        Paragraph(text="This procedure applies to all lab testing."),
+        Paragraph(text="MATERIALS AND METHODS"),
+        Paragraph(text="Use validated equipment only."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "SCOPE"
+    assert sections[1].heading == "MATERIALS AND METHODS"
+
+
+def test_all_caps_sentence_ending_in_period_is_not_a_heading():
+    paragraphs = [
+        Paragraph(text="1.0 Warnings"),
+        Paragraph(text="DO NOT USE IF SEAL IS BROKEN."),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 1
+    assert sections[0].heading == "1.0 Warnings"
+    assert [p.text for p in sections[0].paragraphs] == ["DO NOT USE IF SEAL IS BROKEN."]

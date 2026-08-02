@@ -7,9 +7,7 @@ MAX_HEADING_LENGTH = 120
 MAX_HEADING_WORDS = 12
 
 
-def _looks_like_heading(text: str) -> bool:
-    if not HEADING_NUMBER_PATTERN.match(text):
-        return False
+def _looks_like_heading_shape(text: str) -> bool:
     if len(text) > MAX_HEADING_LENGTH:
         return False
     if len(text.split()) > MAX_HEADING_WORDS:
@@ -19,11 +17,26 @@ def _looks_like_heading(text: str) -> bool:
     return True
 
 
-def split_into_sections(paragraphs: list[Paragraph]) -> list[Section]:
-    heading_indices = [i for i, p in enumerate(paragraphs) if p.is_heading]
+def _looks_like_numbered_heading(text: str) -> bool:
+    return bool(HEADING_NUMBER_PATTERN.match(text)) and _looks_like_heading_shape(text)
 
-    if not heading_indices:
-        heading_indices = [i for i, p in enumerate(paragraphs) if _looks_like_heading(p.text)]
+
+def _looks_like_all_caps_heading(text: str) -> bool:
+    return text.isupper() and _looks_like_heading_shape(text)
+
+
+def _is_heading_paragraph(p: Paragraph) -> bool:
+    if p.is_heading:
+        return True
+    if _looks_like_numbered_heading(p.text):
+        return True
+    if _looks_like_all_caps_heading(p.text):
+        return True
+    return False
+
+
+def split_into_sections(paragraphs: list[Paragraph]) -> list[Section]:
+    heading_indices = [i for i, p in enumerate(paragraphs) if _is_heading_paragraph(p)]
 
     if not heading_indices:
         return [

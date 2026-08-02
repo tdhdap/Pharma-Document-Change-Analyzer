@@ -133,12 +133,35 @@ def test_extract_docx_tags_font_size_only_heading(tmp_path):
     assert heading_paragraphs[0].text == "Sample Preparation"
 
 
-def test_extract_docx_does_not_flag_normal_body_text_as_heading(tmp_path):
+def test_extract_docx_does_not_flag_size_below_threshold_as_heading(tmp_path):
+    """Test that a paragraph with explicit font size just below the heading threshold
+    (11.0pt baseline + 2.0pt delta = 13.0pt) is NOT flagged as heading, even if text looks
+    like a heading."""
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
-    doc.add_paragraph("This is a completely normal paragraph with no special formatting at all.")
+    p = doc.add_paragraph()
+    run = p.add_run("Sample Preparation")
+    run.font.size = Pt(12)  # Only +1.0pt above baseline, below the +2.0pt threshold
     doc.save(str(file_path))
 
     paragraphs = extract_text(str(file_path), "docx")
 
-    assert all(not p.is_heading for p in paragraphs)
+    assert len(paragraphs) == 1
+    assert paragraphs[0].text == "Sample Preparation"
+    assert paragraphs[0].is_heading is False  # Should NOT be flagged (size 12 < threshold 13)
+
+
+def test_extract_docx_does_not_flag_large_font_long_text_as_heading(tmp_path):
+    """Test that a paragraph with large font size (above threshold) but whose text
+    fails the shape guard (long sentence with period) is NOT flagged as heading."""
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph()
+    run = p.add_run("This is a long sentence with large font size but it ends with a period.")
+    run.font.size = Pt(16)  # Clearly above threshold (11.0 + 2.0 = 13.0)
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert len(paragraphs) == 1
+    assert paragraphs[0].is_heading is False  # Should NOT be flagged (shape guard fails due to period)

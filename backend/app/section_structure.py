@@ -39,3 +39,57 @@ def detect_section_renumbering(
             reason=f"Section renumbered from '{old_num}' to '{new_num}'.", source="Body",
         ))
     return changes
+
+
+def _longest_increasing_subsequence_indices(values: list[int]) -> set[int]:
+    if not values:
+        return set()
+
+    n = len(values)
+    lengths = [1] * n
+    predecessors = [-1] * n
+
+    for i in range(n):
+        for j in range(i):
+            if values[j] < values[i] and lengths[j] + 1 > lengths[i]:
+                lengths[i] = lengths[j] + 1
+                predecessors[i] = j
+
+    best_end = max(range(n), key=lambda i: lengths[i])
+    kept = set()
+    i = best_end
+    while i != -1:
+        kept.add(i)
+        i = predecessors[i]
+    return kept
+
+
+def detect_section_reordering(
+    matches: list[SectionMatch],
+    old_sections: list[Section],
+    new_sections: list[Section],
+) -> list[Change]:
+    if not matches:
+        return []
+
+    ordered = sorted(matches, key=lambda m: m.old_index)
+    new_index_sequence = [m.new_index for m in ordered]
+    kept_positions = _longest_increasing_subsequence_indices(new_index_sequence)
+
+    changes: list[Change] = []
+    for i, m in enumerate(ordered):
+        if i in kept_positions:
+            continue
+        heading = new_sections[m.new_index].heading
+        change_type = "section_reordered"
+        reason = (
+            f"Section moved from position {m.old_index + 1} to "
+            f"position {m.new_index + 1} in the document."
+        )
+        changes.append(Change(
+            change_id=str(uuid.uuid4()), section=heading, change_type=change_type,
+            old_text=heading, new_text=heading, old_page=None, new_page=None,
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=reason, source="Body",
+        ))
+    return changes

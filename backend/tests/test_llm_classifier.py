@@ -54,3 +54,21 @@ def test_gemini_failure_falls_back_to_unclassified(monkeypatch):
     assert all(r.change_type == "unclassified" for r in results)
     assert all(r.confidence == 0.0 for r in results)
     assert {r.change_id for r in results} == {"c1", "c2"}
+
+
+def test_prompt_includes_already_detected_hint_when_present():
+    unresolved = [
+        {"change_id": "c1", "old_text": "a", "new_text": "b", "already_detected": ["numeric_change"]},
+    ]
+    prompt = llm_classifier._build_prompt(unresolved)
+    assert "already_detected" in prompt
+    assert "numeric_change" in prompt
+
+
+def test_prompt_omits_already_detected_key_when_empty_or_absent():
+    unresolved_empty = [{"change_id": "c1", "old_text": "a", "new_text": "b", "already_detected": []}]
+    unresolved_absent = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
+    prompt_empty = llm_classifier._build_prompt(unresolved_empty)
+    prompt_absent = llm_classifier._build_prompt(unresolved_absent)
+    assert '"already_detected"' not in prompt_empty
+    assert '"already_detected"' not in prompt_absent

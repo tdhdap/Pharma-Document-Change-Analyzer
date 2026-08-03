@@ -25,21 +25,37 @@ def _get_client():
 
 
 def _build_prompt(unresolved: list[dict]) -> str:
+    # Check if any item has a non-empty already_detected list
+    has_already_detected = any(item.get("already_detected") for item in unresolved)
+
     lines = [
         "You are reviewing paired old/new text from a revised pharmaceutical document.",
         "For each item, classify the change into exactly one of these types:",
         *[f"- {t}" for t in SEMANTIC_CHANGE_TYPES],
         "Respond ONLY with a JSON array. Each element must have keys:",
         '"change_id", "change_type", "reason" (one sentence), "confidence" (0.0-1.0).',
-        "",
-        "Items:",
     ]
+
+    if has_already_detected:
+        lines.extend([
+            "Some items include an \"already_detected\" list -- these are change types a separate",
+            "automated check already found for that item. If present, classify only a genuinely",
+            "distinct additional change beyond what's already listed; do not restate or",
+            "re-describe the already-detected fact.",
+        ])
+
+    lines.append("")
+    lines.append("Items:")
+
     for item in unresolved:
-        lines.append(json.dumps({
+        entry = {
             "change_id": item["change_id"],
             "old_text": item["old_text"],
             "new_text": item["new_text"],
-        }))
+        }
+        if item.get("already_detected"):
+            entry["already_detected"] = item["already_detected"]
+        lines.append(json.dumps(entry))
     return "\n".join(lines)
 
 

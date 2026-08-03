@@ -1,6 +1,6 @@
 import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 
 from app.extraction import extract_text
 
@@ -416,3 +416,107 @@ def test_extract_docx_page_header_and_footer_both_present_appear_in_order(tmp_pa
     assert texts.index("Page Header") < texts.index("Header text")
     assert texts.index("Header text") < texts.index("Page Footer")
     assert texts.index("Page Footer") < texts.index("Footer text")
+
+
+def test_extract_docx_horizontally_merged_cell_extracted_once(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(0, 0).text = "MERGED HEADER CELL"
+    table.cell(1, 0).text = "A"
+    table.cell(1, 1).text = "B"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert texts.count("MERGED HEADER CELL") == 1
+    assert texts.count("A") == 1
+    assert texts.count("B") == 1
+
+
+def test_extract_docx_vertically_merged_cell_extracted_once(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(1, 0))
+    table.cell(0, 0).text = "VMERGED"
+    table.cell(0, 1).text = "TOP RIGHT"
+    table.cell(1, 1).text = "BOTTOM RIGHT"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert texts.count("VMERGED") == 1
+    assert texts.count("TOP RIGHT") == 1
+    assert texts.count("BOTTOM RIGHT") == 1
+
+
+def test_extract_docx_whitespace_only_header_produces_no_page_header_section(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].header.paragraphs[0].text = "   "
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header" not in texts
+
+
+def test_extract_docx_table_inside_header_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    header = doc.sections[0].header
+    header.paragraphs[0].text = "SOP-1234"
+    table = header.add_table(rows=1, cols=2, width=Inches(6))
+    table.cell(0, 0).text = "Header cell A"
+    table.cell(0, 1).text = "Header cell B"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Header cell A" in texts
+    assert "Header cell B" in texts
+
+
+def test_extract_docx_multiple_sections_with_distinct_headers_combine(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("First section body.")
+    doc.sections[0].header.paragraphs[0].text = "First Header"
+    doc.add_section()
+    # A newly added section's header defaults to is_linked_to_previous=True, in which
+    # case its "paragraphs" proxy the previous section's header paragraphs (so writing
+    # through it would silently overwrite "First Header" instead of creating a second,
+    # distinct header). Explicitly unlink it first to get a genuinely separate header.
+    doc.sections[1].header.is_linked_to_previous = False
+    doc.sections[1].header.paragraphs[0].text = "Second Header"
+    doc.add_paragraph("Second section body.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "First Header" in texts
+    assert "Second Header" in texts
+
+
+def test_extract_docx_table_only_document_with_no_body_paragraphs(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Only cell A"
+    table.cell(0, 1).text = "Only cell B"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Only cell A" in texts
+    assert "Only cell B" in texts

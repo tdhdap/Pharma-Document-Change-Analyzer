@@ -64,8 +64,25 @@ def _iter_docx_paragraphs(content_iter):
         if isinstance(item, DocxParagraph):
             yield item
         elif isinstance(item, DocxTable):
+            seen_cells = set()
             for row in item.rows:
                 for cell in row.cells:
+                    # python-docx's row.cells returns one proxy per grid column, so a
+                    # horizontally merged cell is returned once per spanned column, and a
+                    # vertically merged cell reappears in every spanned row - all of these
+                    # proxies wrap the same underlying <w:tc> element. python-docx exposes
+                    # no public identity check for "this proxy wraps a cell I already
+                    # visited", so we dedupe on the underlying XML element itself (`_tc`).
+                    # Note: we must keep the element object itself in the set (not e.g.
+                    # id(cell._tc)) - lxml only guarantees a stable id() for an element
+                    # while some Python reference to its proxy is still alive; for a
+                    # vertical merge, row.cells re-derives the continuation cell's `_tc`
+                    # via a fresh lookup (tc_above) each time, so if we didn't hold a
+                    # live reference here, the earlier proxy could be garbage collected
+                    # and id() would no longer match on the next row.
+                    if cell._tc in seen_cells:
+                        continue
+                    seen_cells.add(cell._tc)
                     yield from _iter_docx_paragraphs(cell.iter_inner_content())
 
 
@@ -156,6 +173,12 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             header_paragraphs.extend(_iter_docx_paragraphs(section.header.iter_inner_content()))
         if not section.footer.is_linked_to_previous:
             footer_paragraphs.extend(_iter_docx_paragraphs(section.footer.iter_inner_content()))
+
+    # Filter out paragraphs with no real text (whitespace-only, or image/drawing-only
+    # content where python-docx's Paragraph.text is empty) before checking emptiness,
+    # so a header/footer with no actual content doesn't emit a bare pseudo-section.
+    header_paragraphs = [p for p in header_paragraphs if p.text.strip()]
+    footer_paragraphs = [p for p in footer_paragraphs if p.text.strip()]
 
     if header_paragraphs:
         paragraphs.append(Paragraph(text="Page Header", paragraph_index=index, is_heading=True))

@@ -520,3 +520,95 @@ def test_extract_docx_table_only_document_with_no_body_paragraphs(tmp_path):
 
     assert "Only cell A" in texts
     assert "Only cell B" in texts
+
+
+def test_extract_docx_all_caps_table_cell_stays_in_its_section(tmp_path):
+    """Test that ALL-CAPS table cell text doesn't fragment into its own heading section.
+    The key is that allow_text_pattern_heading=False for table cells, so the sectioning
+    logic won't detect "HPLC" as a heading."""
+    from app.sectioning import split_into_sections
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("2.0 Acceptance Criteria", style="Heading 1")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Method"
+    table.cell(0, 1).text = "HPLC"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    sections = split_into_sections(paragraphs)
+
+    # Should have exactly 1 section (the main one under "2.0 Acceptance Criteria")
+    # "HPLC" should NOT become its own section heading
+    assert len(sections) == 1
+    assert sections[0].heading == "2.0 Acceptance Criteria"
+    body_texts = [p.text for p in sections[0].paragraphs]
+    assert "HPLC" in body_texts
+
+
+def test_extract_docx_all_caps_header_text_stays_in_page_header_section(tmp_path):
+    """Test that ALL-CAPS header text doesn't fragment into its own heading.
+    The key is that allow_text_pattern_heading=False for header paragraphs."""
+    from app.sectioning import split_into_sections
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].header.paragraphs[0].text = "CONFIDENTIAL"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    sections = split_into_sections(paragraphs)
+
+    # Should have 2 sections: Preamble (body) and Page Header
+    # "CONFIDENTIAL" should NOT become its own section heading under Page Header
+    assert len(sections) == 2
+    assert sections[0].heading == "Preamble"
+    assert sections[1].heading == "Page Header"
+    header_body = [p.text for p in sections[1].paragraphs]
+    assert "CONFIDENTIAL" in header_body
+
+
+def test_extract_docx_font_size_heading_inside_table_cell_still_detected(tmp_path):
+    """Regression guard: structural signals (font-size) must still work
+    inside table cells even though the text-pattern fallback is now
+    disallowed there."""
+    from app.sectioning import split_into_sections
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
+    table = doc.add_table(rows=1, cols=1)
+    p = table.cell(0, 0).paragraphs[0]
+    run = p.add_run("Sample Preparation")
+    run.bold = True
+    run.font.size = Pt(16)
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    sections = split_into_sections(paragraphs)
+
+    # Font-size should still work inside table cells, so "Sample Preparation"
+    # should be detected as a heading and create its own section
+    assert len(sections) == 2
+    assert sections[0].heading == "Preamble"
+    assert sections[1].heading == "Sample Preparation"
+
+
+def test_extract_docx_all_caps_body_paragraph_still_a_heading(tmp_path):
+    """Regression guard: body-paragraph ALL-CAPS detection (not from a
+    table or header/footer) is completely unaffected by this change."""
+    from app.sectioning import split_into_sections
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("SCOPE")
+    doc.add_paragraph("This procedure applies to all lab testing.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    sections = split_into_sections(paragraphs)
+
+    # Body paragraphs should still have allow_text_pattern_heading=True,
+    # so "SCOPE" should be detected as a heading
+    assert len(sections) == 1
+    assert sections[0].heading == "SCOPE"
+    body_texts = [p.text for p in sections[0].paragraphs]
+    assert "This procedure applies to all lab testing." in body_texts

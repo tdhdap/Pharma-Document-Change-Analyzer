@@ -62,7 +62,7 @@ def _docx_body_baseline_pt(doc) -> float:
 def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True):
     for item in content_iter:
         if isinstance(item, DocxParagraph):
-            yield item, allow_text_pattern_heading
+            yield item, allow_text_pattern_heading, False
         elif isinstance(item, DocxTable):
             seen_cells = set()
             for row in item.rows:
@@ -88,10 +88,16 @@ def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True):
                     # abbreviations (HPLC, NMT 0.5%) that look exactly like a heading by
                     # shape alone. Structural signals (Word style, font-size) still work
                     # fine inside a cell, so only the text-pattern fallback is disabled.
-                    yield from _iter_docx_paragraphs(cell.iter_inner_content(), allow_text_pattern_heading=False)
+                    # from_table is always True here regardless of what was passed in -
+                    # once inside a table, it stays True even for a table nested inside
+                    # a header/footer, or a table nested inside another table's cell.
+                    for para, _, _ in _iter_docx_paragraphs(cell.iter_inner_content(), allow_text_pattern_heading=False):
+                        yield para, False, True
 
 
-def _docx_paragraph_to_model(para, index: int, baseline_pt: float, allow_text_pattern_heading: bool = True) -> Paragraph | None:
+def _docx_paragraph_to_model(
+    para, index: int, baseline_pt: float, allow_text_pattern_heading: bool = True, from_table: bool = False
+) -> Paragraph | None:
     text = para.text.strip()
     if not text:
         return None
@@ -110,6 +116,7 @@ def _docx_paragraph_to_model(para, index: int, baseline_pt: float, allow_text_pa
         paragraph_index=index,
         is_heading=is_heading_style or is_heading_size,
         allow_text_pattern_heading=allow_text_pattern_heading,
+        from_table=from_table,
     )
 
 
@@ -166,8 +173,8 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
 
     paragraphs: list[Paragraph] = []
     index = 0
-    for para, allow_text_pattern_heading in _iter_docx_paragraphs(doc.iter_inner_content()):
-        model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading)
+    for para, allow_text_pattern_heading, from_table in _iter_docx_paragraphs(doc.iter_inner_content()):
+        model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
         if model is not None:
             paragraphs.append(model)
             index += 1
@@ -187,14 +194,14 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     # Filter out paragraphs with no real text (whitespace-only, or image/drawing-only
     # content where python-docx's Paragraph.text is empty) before checking emptiness,
     # so a header/footer with no actual content doesn't emit a bare pseudo-section.
-    header_paragraphs = [(p, atph) for p, atph in header_paragraphs if p.text.strip()]
-    footer_paragraphs = [(p, atph) for p, atph in footer_paragraphs if p.text.strip()]
+    header_paragraphs = [(p, atph, ft) for p, atph, ft in header_paragraphs if p.text.strip()]
+    footer_paragraphs = [(p, atph, ft) for p, atph, ft in footer_paragraphs if p.text.strip()]
 
     if header_paragraphs:
         paragraphs.append(Paragraph(text="Page Header", paragraph_index=index, is_heading=True))
         index += 1
-        for para, allow_text_pattern_heading in header_paragraphs:
-            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading)
+        for para, allow_text_pattern_heading, from_table in header_paragraphs:
+            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
             if model is not None:
                 paragraphs.append(model)
                 index += 1
@@ -202,8 +209,8 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     if footer_paragraphs:
         paragraphs.append(Paragraph(text="Page Footer", paragraph_index=index, is_heading=True))
         index += 1
-        for para, allow_text_pattern_heading in footer_paragraphs:
-            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading)
+        for para, allow_text_pattern_heading, from_table in footer_paragraphs:
+            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
             if model is not None:
                 paragraphs.append(model)
                 index += 1

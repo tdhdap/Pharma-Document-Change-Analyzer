@@ -9,6 +9,7 @@ class Paragraph:
     paragraph_index: Optional[int] = None
     is_heading: bool = False
     allow_text_pattern_heading: bool = True
+    from_table: bool = False
 
 
 @dataclass
@@ -74,6 +75,7 @@ class Change:
     reviewer_risk_level: Optional[str] = None
     reviewer_comment: Optional[str] = None
     accepted: bool = False
+    source: str = "Body"
 
 
 @dataclass

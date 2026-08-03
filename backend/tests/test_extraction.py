@@ -609,3 +609,61 @@ def test_extract_docx_all_caps_body_paragraph_still_a_heading(tmp_path):
     assert sections[0].heading == "SCOPE"
     body_texts = [p.text for p in sections[0].paragraphs]
     assert "This procedure applies to all lab testing." in body_texts
+
+
+def test_extract_docx_table_cell_has_from_table_true(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("2.0 Acceptance Criteria", style="Heading 1")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Method"
+    table.cell(0, 1).text = "HPLC"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    assert by_text["2.0 Acceptance Criteria"].from_table is False
+    assert by_text["Method"].from_table is True
+    assert by_text["HPLC"].from_table is True
+
+
+def test_extract_docx_body_paragraph_has_from_table_false(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("1.0 Scope", style="Heading 1")
+    doc.add_paragraph("This procedure applies to all lab testing.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert all(p.from_table is False for p in paragraphs)
+
+
+def test_extract_docx_header_paragraph_not_from_table(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].header.paragraphs[0].text = "Confidential"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    header_para = next(p for p in paragraphs if p.text == "Confidential")
+
+    assert header_para.from_table is False
+
+
+def test_extract_docx_table_inside_header_has_from_table_true(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    header = doc.sections[0].header
+    header.paragraphs[0].text = "SOP-1234"
+    table = header.add_table(rows=1, cols=1, width=Inches(6))
+    table.cell(0, 0).text = "Header Table Cell"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    cell_para = next(p for p in paragraphs if p.text == "Header Table Cell")
+
+    assert cell_para.from_table is True

@@ -27,7 +27,13 @@ BODY_FONTSIZE = 11
 HEADING_FONTSIZE = 16
 LINE_GAP = 30
 PAGE_MARGIN = 72
-PAGE_USABLE_BOTTOM = 720
+# 450 (not a full page's worth, e.g. 720) is deliberate: it caps a page at 13
+# lines, so the larger scenarios (C1, SOP: 19-21 lines each) genuinely span
+# 2 PDF pages, exercising write_pdf's page-break branch and real multi-page
+# TOC/page-number tagging -- while the smaller scenarios (A, B: 12 lines
+# each) still fit on one page. A full-page value never exercised the break
+# at all, since no scenario in this plan reaches ~22 lines.
+PAGE_USABLE_BOTTOM = 450
 
 STRUCTURAL = "structural"
 ALL_CAPS = "all_caps"
@@ -132,21 +138,21 @@ def generate_and_validate(name, version, sections, convention):
 # Heading convention: structural (DOCX "Heading 1" style / PDF embedded TOC).
 
 SCENARIO_A_V1 = [
-    {"heading": "1.0 Effective Date", "body": ["This procedure is effective from 2024-01-15."]},
-    {"heading": "2.0 Storage Temperature", "body": ["Store the reference standard at -20°C."]},
-    {"heading": "3.0 Batch Size", "body": ["Manufacture in batches of 1,000 mg per lot."]},
-    {"heading": "4.0 Reference Standard Weighing", "body": ["Weigh 50 mg of Batch 12 reference standard for the assay."]},
-    {"heading": "5.0 Container Specification", "body": ["Dispense the solution into a 10 mL amber glass vial."]},
-    {"heading": "6.0 Calibration Frequency", "body": ["Calibrate the analytical balance every 30 days using a 200 g reference weight."]},
+    {"heading": "Effective Date", "body": ["This procedure is effective from 2024-01-15."]},
+    {"heading": "Storage Temperature", "body": ["Store the reference standard at -20°C."]},
+    {"heading": "Batch Size", "body": ["Manufacture in batches of 1,000 mg per lot."]},
+    {"heading": "Reference Standard Weighing", "body": ["Weigh 50 mg of Batch 12 reference standard for the assay."]},
+    {"heading": "Container Specification", "body": ["Dispense the solution into a 10 mL amber glass vial."]},
+    {"heading": "Calibration Frequency", "body": ["Calibrate the analytical balance every 30 days using a 200 g reference weight."]},
 ]
 
 SCENARIO_A_V2 = [
-    {"heading": "1.0 Effective Date", "body": ["This procedure is effective from 2024-03-20."]},
-    {"heading": "2.0 Storage Temperature", "body": ["Store the reference standard at -70°C."]},
-    {"heading": "3.0 Batch Size", "body": ["Manufacture in batches of 2,000 mg per lot."]},
-    {"heading": "4.0 Reference Standard Weighing", "body": ["Weigh 55 mg of Batch 13 reference standard for the assay."]},
-    {"heading": "5.0 Container Specification", "body": ["Dispense the solution into a 10 L amber glass vial."]},
-    {"heading": "6.0 Calibration Frequency", "body": ["Calibrate the analytical balance every 30 days using a 200 g reference weight."]},
+    {"heading": "Effective Date", "body": ["This procedure is effective from 2024-03-20."]},
+    {"heading": "Storage Temperature", "body": ["Store the reference standard at -70°C."]},
+    {"heading": "Batch Size", "body": ["Manufacture in batches of 2,000 mg per lot."]},
+    {"heading": "Reference Standard Weighing", "body": ["Weigh 55 mg of Batch 13 reference standard for the assay."]},
+    {"heading": "Container Specification", "body": ["Dispense the solution into a 10 L amber glass vial."]},
+    {"heading": "Calibration Frequency", "body": ["Calibrate the analytical balance every 30 days using a 200 g reference weight."]},
 ]
 
 # --- Scenario B: wording/reason changes, no structural change.

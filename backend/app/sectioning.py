@@ -28,6 +28,8 @@ def _looks_like_all_caps_heading(text: str) -> bool:
 def _is_heading_paragraph(p: Paragraph) -> bool:
     if p.is_heading:
         return True
+    if not p.allow_text_pattern_heading:
+        return False
     if _looks_like_numbered_heading(p.text):
         return True
     if _looks_like_all_caps_heading(p.text):

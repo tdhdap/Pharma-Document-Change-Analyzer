@@ -127,3 +127,58 @@ def test_all_caps_sentence_ending_in_period_is_not_a_heading():
     assert len(sections) == 1
     assert sections[0].heading == "1.0 Warnings"
     assert [p.text for p in sections[0].paragraphs] == ["DO NOT USE IF SEAL IS BROKEN."]
+
+
+def test_all_caps_paragraph_with_text_pattern_disallowed_is_not_a_heading():
+    paragraphs = [
+        Paragraph(text="2.0 Acceptance Criteria", is_heading=True),
+        Paragraph(text="Assay", allow_text_pattern_heading=False),
+        Paragraph(text="HPLC", allow_text_pattern_heading=False),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 1
+    assert sections[0].heading == "2.0 Acceptance Criteria"
+    assert [p.text for p in sections[0].paragraphs] == ["Assay", "HPLC"]
+
+
+def test_numbered_pattern_with_text_pattern_disallowed_is_not_a_heading():
+    paragraphs = [
+        Paragraph(text="2.0 Acceptance Criteria", is_heading=True),
+        Paragraph(text="1.0 mg", allow_text_pattern_heading=False),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 1
+    assert sections[0].heading == "2.0 Acceptance Criteria"
+    assert [p.text for p in sections[0].paragraphs] == ["1.0 mg"]
+
+
+def test_all_caps_body_paragraph_is_still_a_heading_by_default():
+    """Regression guard: allow_text_pattern_heading defaults to True, so
+    existing ALL-CAPS body-paragraph detection is completely unaffected."""
+    paragraphs = [
+        Paragraph(text="SCOPE"),
+        Paragraph(text="This procedure applies to all lab testing."),
+        Paragraph(text="MATERIALS"),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 2
+    assert sections[0].heading == "SCOPE"
+    assert sections[1].heading == "MATERIALS"
+
+
+def test_structural_signal_still_wins_when_text_pattern_disallowed():
+    paragraphs = [
+        Paragraph(text="Sample Preparation", is_heading=True, allow_text_pattern_heading=False),
+        Paragraph(text="Weigh 10 mg of sample.", allow_text_pattern_heading=False),
+    ]
+
+    sections = split_into_sections(paragraphs)
+
+    assert len(sections) == 1
+    assert sections[0].heading == "Sample Preparation"

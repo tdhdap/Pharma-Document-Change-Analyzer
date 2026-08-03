@@ -8,6 +8,7 @@ class Paragraph:
     page: Optional[int] = None
     paragraph_index: Optional[int] = None
     is_heading: bool = False
+    allow_text_pattern_heading: bool = True
 
 
 @dataclass

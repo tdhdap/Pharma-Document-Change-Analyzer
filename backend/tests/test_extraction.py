@@ -353,3 +353,66 @@ def test_extract_docx_without_tables_headers_or_footers_is_unchanged(tmp_path):
     assert paragraphs[0].is_heading is True
     assert paragraphs[1].text == "This procedure applies to all testing."
     assert paragraphs[1].is_heading is False
+
+
+def test_extract_docx_adds_page_header_section_when_header_is_set(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].header.paragraphs[0].text = "Confidential SOP-1234"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header" in texts
+    header_index = texts.index("Page Header")
+    assert paragraphs[header_index].is_heading is True
+    assert "Confidential SOP-1234" in texts
+    assert "Page Footer" not in texts
+
+
+def test_extract_docx_adds_page_footer_section_when_footer_is_set(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].footer.paragraphs[0].text = "Page footer text"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Footer" in texts
+    footer_index = texts.index("Page Footer")
+    assert paragraphs[footer_index].is_heading is True
+    assert "Page footer text" in texts
+    assert "Page Header" not in texts
+
+
+def test_extract_docx_omits_page_header_and_footer_when_neither_is_set(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header" not in texts
+    assert "Page Footer" not in texts
+
+
+def test_extract_docx_page_header_and_footer_both_present_appear_in_order(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].header.paragraphs[0].text = "Header text"
+    doc.sections[0].footer.paragraphs[0].text = "Footer text"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert texts.index("Page Header") < texts.index("Header text")
+    assert texts.index("Header text") < texts.index("Page Footer")
+    assert texts.index("Page Footer") < texts.index("Footer text")

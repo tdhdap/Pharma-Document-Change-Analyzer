@@ -148,6 +148,33 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
         if model is not None:
             paragraphs.append(model)
             index += 1
+
+    header_paragraphs = []
+    footer_paragraphs = []
+    for section in doc.sections:
+        if not section.header.is_linked_to_previous:
+            header_paragraphs.extend(_iter_docx_paragraphs(section.header.iter_inner_content()))
+        if not section.footer.is_linked_to_previous:
+            footer_paragraphs.extend(_iter_docx_paragraphs(section.footer.iter_inner_content()))
+
+    if header_paragraphs:
+        paragraphs.append(Paragraph(text="Page Header", paragraph_index=index, is_heading=True))
+        index += 1
+        for para in header_paragraphs:
+            model = _docx_paragraph_to_model(para, index, baseline_pt)
+            if model is not None:
+                paragraphs.append(model)
+                index += 1
+
+    if footer_paragraphs:
+        paragraphs.append(Paragraph(text="Page Footer", paragraph_index=index, is_heading=True))
+        index += 1
+        for para in footer_paragraphs:
+            model = _docx_paragraph_to_model(para, index, baseline_pt)
+            if model is not None:
+                paragraphs.append(model)
+                index += 1
+
     return paragraphs
 
 

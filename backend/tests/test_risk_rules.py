@@ -22,3 +22,7 @@ def test_informational_risk_change_type():
 def test_structural_and_unknown_types_default_to_medium():
     for change_type in ["added_paragraph", "deleted_paragraph", "moved_paragraph", "unclassified", "something_new"]:
         assert assign_risk(change_type) == "Medium"
+
+
+def test_section_renumbered_is_informational_risk():
+    assert assign_risk("section_renumbered") == "Informational"

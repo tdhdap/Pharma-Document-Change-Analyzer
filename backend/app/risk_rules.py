@@ -8,6 +8,7 @@ RISK_TABLE = {
     "date_change": "Medium",
     "clarification_no_meaning_change": "Low",
     "formatting_only": "Informational",
+    "section_renumbered": "Informational",
 }
 
 DEFAULT_RISK = "Medium"

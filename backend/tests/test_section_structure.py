@@ -12,7 +12,7 @@ def test_pure_renumber_is_detected():
     assert len(changes) == 1
     c = changes[0]
     assert c.change_type == "section_renumbered"
-    assert c.section == "3.0 Acceptance Criteria"
+    assert c.section == "2.0 Acceptance Criteria"
     assert c.old_text == "2.0 Acceptance Criteria"
     assert c.new_text == "3.0 Acceptance Criteria"
     assert c.reason == "Section renumbered from '2.0' to '3.0'."
@@ -108,6 +108,70 @@ def test_insertion_elsewhere_does_not_cause_a_false_positive():
         SectionMatch(old_index=0, new_index=1, score=1.0),
         SectionMatch(old_index=1, new_index=2, score=1.0),
         SectionMatch(old_index=2, new_index=3, score=1.0),
+    ]
+
+    assert detect_section_reordering(matches, old_sections, new_sections) == []
+
+
+def test_synthetic_headings_are_not_flagged_as_reordered():
+    # Old: A, Paragraph 1, Paragraph 2, B (A, B are real headings).
+    # New: Paragraph 2, Paragraph 1, A, B.
+    # By plain LIS logic, A and B (positions 0 and 3 in old order) form the
+    # longest increasing subsequence and are kept, while Paragraph 1 and
+    # Paragraph 2 fall outside it and would normally be flagged as
+    # reordered. Since both carry synthetic headings with no real document
+    # text, they must be suppressed instead.
+    old_sections = [
+        Section(heading="A", paragraphs=[]),
+        Section(heading="Paragraph 1", paragraphs=[]),
+        Section(heading="Paragraph 2", paragraphs=[]),
+        Section(heading="B", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="Paragraph 2", paragraphs=[]),
+        Section(heading="Paragraph 1", paragraphs=[]),
+        Section(heading="A", paragraphs=[]),
+        Section(heading="B", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=2, score=1.0),  # A
+        SectionMatch(old_index=1, new_index=1, score=1.0),  # Paragraph 1
+        SectionMatch(old_index=2, new_index=0, score=1.0),  # Paragraph 2
+        SectionMatch(old_index=3, new_index=3, score=1.0),  # B
+    ]
+
+    assert detect_section_reordering(matches, old_sections, new_sections) == []
+
+
+def test_synthetic_heading_on_either_side_alone_suppresses_the_flag():
+    # Old: A, B, C, Paragraph 1, Y. New: M, Paragraph 9, A, B, C.
+    # A, B, C keep their relative order to each other (kept by LIS).
+    # "Paragraph 1" (old side synthetic, new side real heading "M") and "Y"
+    # (old side real, new side synthetic heading "Paragraph 9") both jump
+    # to the front and would normally be flagged by plain LIS - proven by
+    # the fact that without the synthetic guard, only A/B/C form the
+    # longest increasing subsequence of new_index positions. Both must be
+    # suppressed because a synthetic heading appears on at least one side.
+    old_sections = [
+        Section(heading="A", paragraphs=[]),
+        Section(heading="B", paragraphs=[]),
+        Section(heading="C", paragraphs=[]),
+        Section(heading="Paragraph 1", paragraphs=[]),
+        Section(heading="Y", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="M", paragraphs=[]),
+        Section(heading="Paragraph 9", paragraphs=[]),
+        Section(heading="A", paragraphs=[]),
+        Section(heading="B", paragraphs=[]),
+        Section(heading="C", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=2, score=1.0),  # A
+        SectionMatch(old_index=1, new_index=3, score=1.0),  # B
+        SectionMatch(old_index=2, new_index=4, score=1.0),  # C
+        SectionMatch(old_index=3, new_index=0, score=1.0),  # Paragraph 1 -> M (synthetic old side only)
+        SectionMatch(old_index=4, new_index=1, score=1.0),  # Y -> Paragraph 9 (synthetic new side only)
     ]
 
     assert detect_section_reordering(matches, old_sections, new_sections) == []

@@ -33,7 +33,7 @@ def detect_section_renumbering(
             continue
         change_type = "section_renumbered"
         changes.append(Change(
-            change_id=str(uuid.uuid4()), section=new_heading, change_type=change_type,
+            change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=f"Section renumbered from '{old_num}' to '{new_num}'.", source="Body",
@@ -64,6 +64,13 @@ def _longest_increasing_subsequence_indices(values: list[int]) -> set[int]:
     return kept
 
 
+_SYNTHETIC_HEADING_PATTERN = re.compile(r"^Paragraph \d+$")
+
+
+def _is_synthetic_heading(heading: str) -> bool:
+    return heading == "Preamble" or bool(_SYNTHETIC_HEADING_PATTERN.match(heading))
+
+
 def detect_section_reordering(
     matches: list[SectionMatch],
     old_sections: list[Section],
@@ -80,15 +87,18 @@ def detect_section_reordering(
     for i, m in enumerate(ordered):
         if i in kept_positions:
             continue
-        heading = new_sections[m.new_index].heading
+        old_heading = old_sections[m.old_index].heading
+        new_heading = new_sections[m.new_index].heading
+        if _is_synthetic_heading(old_heading) or _is_synthetic_heading(new_heading):
+            continue
         change_type = "section_reordered"
         reason = (
             f"Section moved from position {m.old_index + 1} to "
             f"position {m.new_index + 1} in the document."
         )
         changes.append(Change(
-            change_id=str(uuid.uuid4()), section=heading, change_type=change_type,
-            old_text=heading, new_text=heading, old_page=None, new_page=None,
+            change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
+            old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source="Body",
         ))

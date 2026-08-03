@@ -223,6 +223,8 @@ def test_pipeline_detects_renumbering_and_reordering_together():
         assert c.source == "Body"
 
     assert len(reordered) == 1
-    assert reordered[0].section == "2.0 Approval"
+    assert reordered[0].section == "3.0 Approval"
+    assert reordered[0].old_text == "3.0 Approval"
+    assert reordered[0].new_text == "2.0 Approval"
     assert reordered[0].reason == "Section moved from position 3 to position 2 in the document."
     assert reordered[0].ai_risk_level == "Informational"

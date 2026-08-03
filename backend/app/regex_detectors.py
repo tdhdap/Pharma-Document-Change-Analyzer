@@ -22,6 +22,18 @@ def _extract_dates(text: str) -> list[str]:
     return [m.group(0) for m in DATE_PATTERN.finditer(text)]
 
 
+def _extract_unit_spans(text: str) -> list[tuple[int, int]]:
+    return [m.span(1) for m in UNIT_PATTERN.finditer(text)]
+
+
+def _extract_number_spans(text: str) -> list[tuple[int, int]]:
+    return [m.span() for m in NUMBER_PATTERN.finditer(text)]
+
+
+def _extract_date_spans(text: str) -> list[tuple[int, int]]:
+    return [m.span() for m in DATE_PATTERN.finditer(text)]
+
+
 def detect_date_change(old_text: str, new_text: str) -> RegexDetection | None:
     old_dates = _extract_dates(old_text)
     new_dates = _extract_dates(new_text)
@@ -31,6 +43,8 @@ def detect_date_change(old_text: str, new_text: str) -> RegexDetection | None:
             reason=f"Date changed from {', '.join(old_dates)} to {', '.join(new_dates)}.",
             old_values=old_dates,
             new_values=new_dates,
+            old_spans=_extract_date_spans(old_text),
+            new_spans=_extract_date_spans(new_text),
         )
     return None
 
@@ -44,6 +58,8 @@ def detect_unit_change(old_text: str, new_text: str) -> RegexDetection | None:
             reason=f"Unit changed from {old_units} to {new_units}.",
             old_values=old_units,
             new_values=new_units,
+            old_spans=_extract_unit_spans(old_text),
+            new_spans=_extract_unit_spans(new_text),
         )
     return None
 
@@ -57,6 +73,8 @@ def detect_numeric_change(old_text: str, new_text: str) -> RegexDetection | None
             reason=f"Numeric value(s) changed from {', '.join(old_numbers)} to {', '.join(new_numbers)}.",
             old_values=old_numbers,
             new_values=new_numbers,
+            old_spans=_extract_number_spans(old_text),
+            new_spans=_extract_number_spans(new_text),
         )
     return None
 
@@ -78,12 +96,13 @@ def detect_all_regex_changes(old_text: str, new_text: str) -> list[RegexDetectio
     return detections
 
 
+def _remove_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    for start, end in sorted(spans, reverse=True):
+        text = text[:start] + text[end:]
+    return text
+
+
 def strip_detected_values(old_text: str, new_text: str, detections: list["RegexDetection"]) -> tuple[str, str]:
-    stripped_old = old_text
-    stripped_new = new_text
-    for detection in detections:
-        for value in detection.old_values:
-            stripped_old = stripped_old.replace(value, "", 1)
-        for value in detection.new_values:
-            stripped_new = stripped_new.replace(value, "", 1)
-    return stripped_old, stripped_new
+    old_spans = [span for d in detections for span in d.old_spans]
+    new_spans = [span for d in detections for span in d.new_spans]
+    return _remove_spans(old_text, old_spans), _remove_spans(new_text, new_spans)

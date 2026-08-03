@@ -100,6 +100,22 @@ def test_regex_detection_plus_separate_wording_change_produces_two_rows(monkeypa
     assert change_types == {"numeric_change", "qualitative_specification_change"}
 
 
+def test_date_and_numeric_change_on_one_line_both_survive_with_independent_risk(monkeypatch):
+    old_paragraphs = [Paragraph(text="Sample collected on 01 Jan 2024, weight 50 mg.")]
+    new_paragraphs = [Paragraph(text="Sample collected on 15 Mar 2024, weight 55 mg.")]
+
+    def fail_if_called(unresolved):
+        raise AssertionError("classify_changes_batch should not be called - regex fully explains this line")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    assert result.summary.total_changes == 2
+    risks_by_type = {c.change_type: c.ai_risk_level for c in result.changes}
+    assert risks_by_type == {"date_change": "Medium", "numeric_change": "High"}
+
+
 def test_pending_change_never_leaks_when_llm_response_omits_it(monkeypatch):
     old_paragraphs = [
         Paragraph(text="The Quality Control Manager shall approve the result."),

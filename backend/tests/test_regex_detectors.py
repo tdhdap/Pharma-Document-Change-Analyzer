@@ -94,6 +94,14 @@ def test_strip_detected_values_leaves_a_residual_when_something_else_also_change
     assert stripped_old != stripped_new
 
 
+def test_strip_detected_values_does_not_corrupt_unrelated_words_containing_the_unit_letter():
+    old_text = "Weigh 10 mg of sample."
+    new_text = "Weigh 10 g of sample."
+    detections = detect_all_regex_changes(old_text, new_text)
+    stripped_old, stripped_new = strip_detected_values(old_text, new_text, detections)
+    assert stripped_old == stripped_new
+
+
 def test_detect_all_regex_changes_no_longer_hides_a_higher_risk_change_behind_a_lower_risk_one():
     # Regression guard for the first-match-wins severity-masking bug: date_change (Medium
     # risk) is checked before numeric_change (High risk) in detect_regex_change's fixed

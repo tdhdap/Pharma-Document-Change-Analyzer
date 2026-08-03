@@ -76,10 +76,13 @@ def _parse_response(raw: str, unresolved: list[dict]) -> list[LLMClassification]
     for entry in data:
         if entry.get("change_id") not in valid_ids:
             continue
+        change_type = entry.get("change_type", "unclassified")
+        if change_type not in SEMANTIC_CHANGE_TYPES:
+            change_type = "unclassified"
         results.append(
             LLMClassification(
                 change_id=entry["change_id"],
-                change_type=entry.get("change_type", "unclassified"),
+                change_type=change_type,
                 reason=entry.get("reason", ""),
                 confidence=float(entry.get("confidence", 0.0)),
             )

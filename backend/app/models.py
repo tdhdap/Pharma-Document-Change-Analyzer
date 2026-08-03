@@ -46,6 +46,8 @@ class RegexDetection:
     confidence: float = 1.0
     old_values: list[str] = field(default_factory=list)
     new_values: list[str] = field(default_factory=list)
+    old_spans: list[tuple[int, int]] = field(default_factory=list)
+    new_spans: list[tuple[int, int]] = field(default_factory=list)
 
 
 @dataclass

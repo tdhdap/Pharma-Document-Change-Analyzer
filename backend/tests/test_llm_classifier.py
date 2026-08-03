@@ -56,6 +56,22 @@ def test_gemini_failure_falls_back_to_unclassified(monkeypatch):
     assert {r.change_id for r in results} == {"c1", "c2"}
 
 
+def test_change_type_outside_semantic_types_is_forced_to_unclassified(monkeypatch):
+    unresolved = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
+
+    def fake_call_gemini(items, model_name):
+        return json.dumps([
+            {"change_id": "c1", "change_type": "numeric_change", "reason": "restated a regex fact", "confidence": 0.8},
+        ])
+
+    monkeypatch.setattr(llm_classifier, "_call_gemini", fake_call_gemini)
+
+    results = classify_changes_batch(unresolved)
+
+    assert len(results) == 1
+    assert results[0].change_type == "unclassified"
+
+
 def test_prompt_includes_already_detected_hint_when_present():
     unresolved = [
         {"change_id": "c1", "old_text": "a", "new_text": "b", "already_detected": ["numeric_change"]},

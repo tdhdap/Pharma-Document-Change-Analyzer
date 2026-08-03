@@ -27,6 +27,8 @@ BODY_FONTSIZE = 11
 HEADING_FONTSIZE = 16
 LINE_GAP = 30
 PAGE_MARGIN = 72
+PAGE_WIDTH = 595.0  # PyMuPDF's default fitz.open().new_page() size (A4)
+USABLE_TEXT_WIDTH = PAGE_WIDTH - PAGE_MARGIN
 # 450 (not a full page's worth, e.g. 720) is deliberate: it caps a page at 13
 # lines, so the larger scenarios (C1, SOP: 19-21 lines each) genuinely span
 # 2 PDF pages, exercising write_pdf's page-break branch and real multi-page
@@ -70,6 +72,32 @@ def write_docx(path, sections, convention):
     doc.save(str(path))
 
 
+def _wrap_line(text, fontsize, max_width):
+    """Split text into lines that each fit max_width at fontsize.
+
+    page.insert_text() does not wrap -- a line wider than the page silently
+    clips (both visually and in extraction) at the page edge, with the
+    clipped-off text simply gone. Wrapping here and joining with "\\n" in one
+    insert_text call keeps the paragraph as a single dict-mode block (same
+    technique the existing extraction tests already rely on for wrapped
+    paragraphs), so this only affects rendering, not paragraph granularity.
+    """
+    words = text.split(" ")
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if fitz.get_text_length(candidate, fontsize=fontsize) <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 def write_pdf(path, sections, convention):
     pdf = fitz.open()
     page = pdf.new_page()
@@ -77,12 +105,13 @@ def write_pdf(path, sections, convention):
     toc_entries = []
 
     def emit(text, fontsize):
+        lines = _wrap_line(text, fontsize, USABLE_TEXT_WIDTH)
         if state["y"] > PAGE_USABLE_BOTTOM:
             state["page"] = pdf.new_page()
             state["y"] = PAGE_MARGIN
             state["page_number"] += 1
-        state["page"].insert_text((PAGE_MARGIN, state["y"]), text, fontsize=fontsize)
-        state["y"] += LINE_GAP
+        state["page"].insert_text((PAGE_MARGIN, state["y"]), "\n".join(lines), fontsize=fontsize)
+        state["y"] += LINE_GAP * len(lines)
         return state["page_number"]
 
     for i, sec in enumerate(sections):

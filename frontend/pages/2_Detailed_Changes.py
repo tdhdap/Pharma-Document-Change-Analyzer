@@ -3,6 +3,8 @@ import streamlit as st
 from logic import filter_changes
 from bootstrap import ensure_backend_running
 
+st.set_page_config(layout="wide")
+
 ensure_backend_running()
 
 st.title("Detailed Changes")

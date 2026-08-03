@@ -30,13 +30,26 @@ CREATE TABLE IF NOT EXISTS changes (
     reviewer_risk_level TEXT,
     reason TEXT,
     reviewer_comment TEXT,
-    accepted INTEGER DEFAULT 0
+    accepted INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'Body'
 );
 """
+
+
+def _ensure_changes_source_column(conn: sqlite3.Connection) -> None:
+    # CREATE TABLE IF NOT EXISTS above only applies to brand-new databases - it does
+    # not add columns to a changes table that already exists from before this field
+    # was introduced. Any pre-existing database (including the real backend/app.db
+    # file already in use) needs this explicit, idempotent migration instead.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(changes)").fetchall()}
+    if "source" not in columns:
+        conn.execute("ALTER TABLE changes ADD COLUMN source TEXT DEFAULT 'Body'")
+        conn.commit()
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _ensure_changes_source_column(conn)
     return conn

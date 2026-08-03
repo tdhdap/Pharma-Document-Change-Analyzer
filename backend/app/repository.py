@@ -29,12 +29,12 @@ def save_comparison(conn, comparison: ComparisonResult, old_document_id: str, ne
         conn.execute(
             """INSERT INTO changes
                (id, comparison_id, section, change_type, old_text, new_text, old_page, new_page,
-                confidence, ai_risk_level, reviewer_risk_level, reason, reviewer_comment, accepted)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence, ai_risk_level, reviewer_risk_level, reason, reviewer_comment, accepted, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.change_id, comparison.comparison_id, c.section, c.change_type, c.old_text, c.new_text,
                 c.old_page, c.new_page, c.confidence, c.ai_risk_level, c.reviewer_risk_level, c.reason,
-                c.reviewer_comment, int(c.accepted),
+                c.reviewer_comment, int(c.accepted), c.source,
             ),
         )
     conn.commit()
@@ -47,6 +47,7 @@ def _row_to_change(row) -> Change:
         new_page=row["new_page"], confidence=row["confidence"], ai_risk_level=row["ai_risk_level"],
         reason=row["reason"], reviewer_risk_level=row["reviewer_risk_level"],
         reviewer_comment=row["reviewer_comment"], accepted=bool(row["accepted"]),
+        source=row["source"] if row["source"] is not None else "Body",
     )
 
 

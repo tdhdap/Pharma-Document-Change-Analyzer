@@ -1,3 +1,5 @@
+import sqlite3
+
 from app.db import get_connection
 from app.models import Change, ComparisonResult, build_summary
 from app import repository
@@ -79,3 +81,72 @@ def test_update_change_sets_reviewer_fields():
 def test_update_change_returns_none_when_missing():
     conn = make_conn()
     assert repository.update_change(conn, "does-not-exist", accepted=True) is None
+
+
+def test_save_and_get_comparison_round_trip_preserves_source():
+    conn = make_conn()
+    old_id = repository.create_document(conn, "old.txt", "txt", "/data/old.txt")
+    new_id = repository.create_document(conn, "new.txt", "txt", "/data/new.txt")
+
+    changes = [
+        Change(
+            change_id="ch-1", section="2.0 Acceptance Criteria", change_type="added_table_content",
+            old_text="", new_text="Microbial Limits", old_page=None, new_page=1,
+            confidence=1.0, ai_risk_level="Medium", reason="New table content added.",
+            source="Table",
+        ),
+    ]
+    comparison = ComparisonResult(
+        comparison_id="cmp-2", old_document="old.txt", new_document="new.txt",
+        summary=build_summary(changes), changes=changes,
+    )
+
+    repository.save_comparison(conn, comparison, old_id, new_id)
+    fetched = repository.get_comparison(conn, "cmp-2")
+
+    assert fetched.changes[0].source == "Table"
+
+
+def test_save_and_get_comparison_defaults_source_to_body():
+    conn = make_conn()
+    old_id = repository.create_document(conn, "old.txt", "txt", "/data/old.txt")
+    new_id = repository.create_document(conn, "new.txt", "txt", "/data/new.txt")
+
+    changes = [
+        Change(
+            change_id="ch-1", section="1.0 Scope", change_type="numeric_change",
+            old_text="95%", new_text="98%", old_page=1, new_page=1,
+            confidence=1.0, ai_risk_level="High", reason="value changed",
+        ),
+    ]
+    comparison = ComparisonResult(
+        comparison_id="cmp-3", old_document="old.txt", new_document="new.txt",
+        summary=build_summary(changes), changes=changes,
+    )
+
+    repository.save_comparison(conn, comparison, old_id, new_id)
+    fetched = repository.get_comparison(conn, "cmp-3")
+
+    assert fetched.changes[0].source == "Body"
+
+
+def test_existing_database_missing_source_column_gets_migrated(tmp_path):
+    db_path = str(tmp_path / "legacy.db")
+    # Simulate a database created before the `source` column existed - this is
+    # exactly the shape of the real backend/app.db file found during planning.
+    legacy_conn = sqlite3.connect(db_path)
+    legacy_conn.execute("""
+        CREATE TABLE changes (
+            id TEXT PRIMARY KEY, comparison_id TEXT NOT NULL, section TEXT, change_type TEXT,
+            old_text TEXT, new_text TEXT, old_page INTEGER, new_page INTEGER, confidence REAL,
+            ai_risk_level TEXT, reviewer_risk_level TEXT, reason TEXT, reviewer_comment TEXT,
+            accepted INTEGER DEFAULT 0
+        )
+    """)
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    conn = get_connection(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(changes)").fetchall()}
+
+    assert "source" in columns

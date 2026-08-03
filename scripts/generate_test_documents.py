@@ -239,6 +239,36 @@ SCENARIO_C2_V2 = [
     ]},
 ]
 
+# --- Scenario SOP: full realistic SOP, wording/numeric changes, section
+# additions and a moved paragraph becoming its own new section.
+# Heading convention: font-size only (Pt(16) vs 11pt body, no Word style,
+# no numbering prefix).
+
+SCENARIO_SOP_V1 = [
+    {"heading": "Scope", "body": ["This procedure applies to the manufacture of Product X tablets at Site A."]},
+    {"heading": "Responsibilities", "body": ["The Quality Control Manager shall review and approve all batch records prior to release."]},
+    {"heading": "Materials", "body": ["The active ingredient shall be stored at 2°C to 8°C prior to use.", "Material shall not be used beyond 24 months from the date of manufacture."]},
+    {"heading": "Assay Acceptance Criteria", "body": ["Assay acceptance criterion: 95.0% to 105.0%."]},
+    {"heading": "Sample Preparation", "body": ["Weigh 10 mg of sample and dilute to 100 mL with mobile phase."]},
+    {"heading": "Sample Analysis", "body": ["Inject 20 microliters into the HPLC system and record the chromatogram."]},
+    {"heading": "Effective Date", "body": ["This procedure is effective from 01 Jan 2024."]},
+    {"heading": "Reference Documents", "body": ["Refer to the Master Calculation SOP for detailed calculation methods."]},
+    {"heading": "Deviation Handling", "body": ["Any deviation from this procedure shall be documented and approved by the Quality Assurance Manager prior to implementation."]},
+]
+
+SCENARIO_SOP_V2 = [
+    {"heading": "Scope", "body": ["This procedure applies to the manufacture of Product X tablets at Site A."]},
+    {"heading": "Responsibilities", "body": ["The Quality Assurance Manager shall review and approve all batch records prior to release."]},
+    {"heading": "Materials", "body": ["The active ingredient shall be stored at 36°F to 46°F prior to use."]},
+    {"heading": "Assay Acceptance Criteria", "body": ["Assay acceptance criterion: 98.0% to 102.0%."]},
+    {"heading": "Sample Preparation", "body": ["Weigh 20 mg of sample and dilute to 200 mL with mobile phase."]},
+    {"heading": "Sample Analysis", "body": ["Filter the sample through a membrane, then inject 20 microliters into the HPLC system and record the chromatogram."]},
+    {"heading": "Effective Date", "body": ["This procedure is effective from 15 Mar 2024."]},
+    {"heading": "Reference Documents", "body": ["Refer to the Analytical Validation SOP for detailed calculation methods."]},
+    {"heading": "Storage and Shelf Life", "body": ["Material shall not be used beyond 24 months from the date of manufacture."]},
+    {"heading": "Training Requirements", "body": ["All analysts performing this procedure shall complete method-specific training prior to independent testing."]},
+]
+
 
 def main():
     generate_and_validate("A", "v1", SCENARIO_A_V1, STRUCTURAL)
@@ -249,6 +279,25 @@ def main():
     generate_and_validate("C1", "v2", SCENARIO_C1_V2, MIXED)
     generate_and_validate("C2", "v1", SCENARIO_C2_V1, NONE_CONVENTION)
     generate_and_validate("C2", "v2", SCENARIO_C2_V2, NONE_CONVENTION)
+    generate_and_validate("SOP", "v1", SCENARIO_SOP_V1, FONT_SIZE)
+
+    # SOP v2 has an exact 10-heading-vs-10-body block-count tie, which would
+    # make the PDF font-size baseline resolve to the heading size instead of
+    # the body size (see this task's docstring/plan notes). One extra
+    # body-only trailing paragraph, present only in the PDF fixture, breaks
+    # the tie. The DOCX fixture doesn't need it (its baseline strategy is
+    # Normal-style-or-11.0, not mode-based) so it stays an exact translation
+    # of SOP_v2.txt.
+    docx_path = DOCX_DIR / "SOP_v2.docx"
+    write_docx(docx_path, SCENARIO_SOP_V2, FONT_SIZE)
+    validate(docx_path, "docx", SCENARIO_SOP_V2)
+
+    pdf_path = PDF_DIR / "SOP_v2.pdf"
+    sop_v2_pdf_sections = SCENARIO_SOP_V2 + [
+        {"heading": None, "body": ["This marks the end of the procedure."]}
+    ]
+    write_pdf(pdf_path, sop_v2_pdf_sections, FONT_SIZE)
+    validate(pdf_path, "pdf", sop_v2_pdf_sections)
 
 
 if __name__ == "__main__":

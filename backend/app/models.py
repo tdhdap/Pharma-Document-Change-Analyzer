@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -44,6 +44,8 @@ class RegexDetection:
     change_type: str
     reason: str
     confidence: float = 1.0
+    old_values: list[str] = field(default_factory=list)
+    new_values: list[str] = field(default_factory=list)
 
 
 @dataclass

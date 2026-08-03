@@ -29,6 +29,8 @@ def detect_date_change(old_text: str, new_text: str) -> RegexDetection | None:
         return RegexDetection(
             change_type="date_change",
             reason=f"Date changed from {', '.join(old_dates)} to {', '.join(new_dates)}.",
+            old_values=old_dates,
+            new_values=new_dates,
         )
     return None
 
@@ -40,6 +42,8 @@ def detect_unit_change(old_text: str, new_text: str) -> RegexDetection | None:
         return RegexDetection(
             change_type="unit_change",
             reason=f"Unit changed from {old_units} to {new_units}.",
+            old_values=old_units,
+            new_values=new_units,
         )
     return None
 
@@ -51,6 +55,8 @@ def detect_numeric_change(old_text: str, new_text: str) -> RegexDetection | None
         return RegexDetection(
             change_type="numeric_change",
             reason=f"Numeric value(s) changed from {', '.join(old_numbers)} to {', '.join(new_numbers)}.",
+            old_values=old_numbers,
+            new_values=new_numbers,
         )
     return None
 
@@ -61,3 +67,23 @@ def detect_regex_change(old_text: str, new_text: str) -> RegexDetection | None:
         if result:
             return result
     return None
+
+
+def detect_all_regex_changes(old_text: str, new_text: str) -> list[RegexDetection]:
+    detections = []
+    for detector in (detect_date_change, detect_unit_change, detect_numeric_change):
+        result = detector(old_text, new_text)
+        if result:
+            detections.append(result)
+    return detections
+
+
+def strip_detected_values(old_text: str, new_text: str, detections: list["RegexDetection"]) -> tuple[str, str]:
+    stripped_old = old_text
+    stripped_new = new_text
+    for detection in detections:
+        for value in detection.old_values:
+            stripped_old = stripped_old.replace(value, "", 1)
+        for value in detection.new_values:
+            stripped_new = stripped_new.replace(value, "", 1)
+    return stripped_old, stripped_new

@@ -3,6 +3,7 @@ from docx import Document as DocxDocument
 from docx.shared import Inches, Pt
 
 from app.extraction import extract_text
+from app.sectioning import split_into_sections
 
 
 def test_extract_txt_splits_on_blank_lines(tmp_path):
@@ -526,7 +527,6 @@ def test_extract_docx_all_caps_table_cell_stays_in_its_section(tmp_path):
     """Test that ALL-CAPS table cell text doesn't fragment into its own heading section.
     The key is that allow_text_pattern_heading=False for table cells, so the sectioning
     logic won't detect "HPLC" as a heading."""
-    from app.sectioning import split_into_sections
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
     doc.add_paragraph("2.0 Acceptance Criteria", style="Heading 1")
@@ -549,7 +549,6 @@ def test_extract_docx_all_caps_table_cell_stays_in_its_section(tmp_path):
 def test_extract_docx_all_caps_header_text_stays_in_page_header_section(tmp_path):
     """Test that ALL-CAPS header text doesn't fragment into its own heading.
     The key is that allow_text_pattern_heading=False for header paragraphs."""
-    from app.sectioning import split_into_sections
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
     doc.add_paragraph("Body content here.")
@@ -572,7 +571,6 @@ def test_extract_docx_font_size_heading_inside_table_cell_still_detected(tmp_pat
     """Regression guard: structural signals (font-size) must still work
     inside table cells even though the text-pattern fallback is now
     disallowed there."""
-    from app.sectioning import split_into_sections
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
     doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
@@ -596,7 +594,6 @@ def test_extract_docx_font_size_heading_inside_table_cell_still_detected(tmp_pat
 def test_extract_docx_all_caps_body_paragraph_still_a_heading(tmp_path):
     """Regression guard: body-paragraph ALL-CAPS detection (not from a
     table or header/footer) is completely unaffected by this change."""
-    from app.sectioning import split_into_sections
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
     doc.add_paragraph("SCOPE")

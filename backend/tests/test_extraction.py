@@ -266,3 +266,90 @@ def test_extract_docx_does_not_flag_large_font_long_text_as_heading(tmp_path):
 
     assert len(paragraphs) == 1
     assert paragraphs[0].is_heading is False  # Should NOT be flagged (shape guard fails due to period)
+
+
+def test_extract_docx_extracts_table_cell_content(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("5.0 Acceptance Criteria", style="Heading 1")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Parameter"
+    table.cell(0, 1).text = "Limit"
+    table.cell(1, 0).text = "Assay"
+    table.cell(1, 1).text = "95.0% to 105.0%"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Parameter" in texts
+    assert "Limit" in texts
+    assert "Assay" in texts
+    assert "95.0% to 105.0%" in texts
+
+
+def test_extract_docx_extracts_nested_table_cell_content(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=1)
+    nested = table.cell(0, 0).add_table(rows=1, cols=1)
+    nested.cell(0, 0).text = "Nested cell text"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Nested cell text" in texts
+
+
+def test_extract_docx_detects_word_style_heading_inside_table_cell(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=1)
+    cell = table.cell(0, 0)
+    cell.paragraphs[0].text = "5.2 Sample Preparation"
+    cell.paragraphs[0].style = doc.styles["Heading 1"]
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    heading_paragraphs = [p for p in paragraphs if p.is_heading]
+
+    assert len(heading_paragraphs) == 1
+    assert heading_paragraphs[0].text == "5.2 Sample Preparation"
+
+
+def test_extract_docx_detects_font_size_heading_inside_table_cell(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Weigh 10 mg of sample and dilute to volume.")
+    table = doc.add_table(rows=1, cols=1)
+    p = table.cell(0, 0).paragraphs[0]
+    run = p.add_run("Sample Preparation")
+    run.bold = True
+    run.font.size = Pt(16)
+    doc.add_paragraph("Inject into the HPLC system.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    heading_paragraphs = [p for p in paragraphs if p.is_heading]
+
+    assert len(heading_paragraphs) == 1
+    assert heading_paragraphs[0].text == "Sample Preparation"
+
+
+def test_extract_docx_without_tables_headers_or_footers_is_unchanged(tmp_path):
+    """Regression guard: this refactor must not change extraction for documents
+    that don't use any of the new features."""
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("1.0 Scope", style="Heading 1")
+    doc.add_paragraph("This procedure applies to all testing.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert len(paragraphs) == 2
+    assert paragraphs[0].text == "1.0 Scope"
+    assert paragraphs[0].is_heading is True
+    assert paragraphs[1].text == "This procedure applies to all testing."
+    assert paragraphs[1].is_heading is False

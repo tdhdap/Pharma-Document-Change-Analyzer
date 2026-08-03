@@ -2,6 +2,8 @@ import collections
 
 import fitz
 from docx import Document as DocxDocument
+from docx.table import Table as DocxTable
+from docx.text.paragraph import Paragraph as DocxParagraph
 
 from app.models import Paragraph
 from app.sectioning import _looks_like_heading_shape
@@ -57,6 +59,37 @@ def _docx_body_baseline_pt(doc) -> float:
     return DOCX_DEFAULT_BODY_SIZE_PT
 
 
+def _iter_docx_paragraphs(content_iter):
+    for item in content_iter:
+        if isinstance(item, DocxParagraph):
+            yield item
+        elif isinstance(item, DocxTable):
+            for row in item.rows:
+                for cell in row.cells:
+                    yield from _iter_docx_paragraphs(cell.iter_inner_content())
+
+
+def _docx_paragraph_to_model(para, index: int, baseline_pt: float) -> Paragraph | None:
+    text = para.text.strip()
+    if not text:
+        return None
+    style_name = para.style.name if para.style else ""
+    is_heading_style = style_name.startswith(HEADING_STYLE_PREFIXES)
+
+    size_pt = _docx_paragraph_font_size_pt(para)
+    is_heading_size = (
+        size_pt is not None
+        and size_pt >= baseline_pt + DOCX_HEADING_SIZE_DELTA_PT
+        and _looks_like_heading_shape(text)
+    )
+
+    return Paragraph(
+        text=text,
+        paragraph_index=index,
+        is_heading=is_heading_style or is_heading_size,
+    )
+
+
 def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
     if file_type == "pdf":
         return _extract_pdf(file_path)
@@ -110,28 +143,11 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
 
     paragraphs: list[Paragraph] = []
     index = 0
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
-            continue
-        style_name = para.style.name if para.style else ""
-        is_heading_style = style_name.startswith(HEADING_STYLE_PREFIXES)
-
-        size_pt = _docx_paragraph_font_size_pt(para)
-        is_heading_size = (
-            size_pt is not None
-            and size_pt >= baseline_pt + DOCX_HEADING_SIZE_DELTA_PT
-            and _looks_like_heading_shape(text)
-        )
-
-        paragraphs.append(
-            Paragraph(
-                text=text,
-                paragraph_index=index,
-                is_heading=is_heading_style or is_heading_size,
-            )
-        )
-        index += 1
+    for para in _iter_docx_paragraphs(doc.iter_inner_content()):
+        model = _docx_paragraph_to_model(para, index, baseline_pt)
+        if model is not None:
+            paragraphs.append(model)
+            index += 1
     return paragraphs
 
 

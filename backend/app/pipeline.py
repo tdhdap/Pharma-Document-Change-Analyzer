@@ -7,21 +7,31 @@ from app.models import Paragraph, Change, ComparisonResult, build_summary
 Orphan = tuple[Paragraph, str]
 
 
-def _build_paragraph_change(section_heading: str, old_p: Paragraph, new_p: Paragraph) -> Change:
-    change_id = str(uuid.uuid4())
-    detection = regex_detectors.detect_regex_change(old_p.text, new_p.text)
-    if detection:
-        return Change(
-            change_id=change_id, section=section_heading, change_type=detection.change_type,
+def _build_paragraph_changes(
+    section_heading: str, old_p: Paragraph, new_p: Paragraph
+) -> tuple[list[Change], dict[str, list[str]]]:
+    detections = regex_detectors.detect_all_regex_changes(old_p.text, new_p.text)
+    changes: list[Change] = []
+    for detection in detections:
+        changes.append(Change(
+            change_id=str(uuid.uuid4()), section=section_heading, change_type=detection.change_type,
             old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
             confidence=detection.confidence, ai_risk_level=risk_rules.assign_risk(detection.change_type),
             reason=detection.reason,
-        )
-    return Change(
-        change_id=change_id, section=section_heading, change_type="pending_llm_classification",
-        old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
-        confidence=0.0, ai_risk_level="Medium", reason="",
-    )
+        ))
+
+    already_detected_by_id: dict[str, list[str]] = {}
+    stripped_old, stripped_new = regex_detectors.strip_detected_values(old_p.text, new_p.text, detections)
+    if stripped_old != stripped_new:
+        pending_id = str(uuid.uuid4())
+        changes.append(Change(
+            change_id=pending_id, section=section_heading, change_type="pending_llm_classification",
+            old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
+            confidence=0.0, ai_risk_level="Medium", reason="",
+        ))
+        already_detected_by_id[pending_id] = [d.change_type for d in detections]
+
+    return changes, already_detected_by_id
 
 
 def compare_documents(
@@ -37,6 +47,7 @@ def compare_documents(
     changes: list[Change] = []
     orphan_deletes: list[Orphan] = []
     orphan_inserts: list[Orphan] = []
+    already_detected_by_id: dict[str, list[str]] = {}
 
     for match in match_result.matches:
         old_sec = old_sections[match.old_index]
@@ -49,7 +60,11 @@ def compare_documents(
             if op.tag == "replace":
                 paired = min(len(op.old_paragraphs), len(op.new_paragraphs))
                 for i in range(paired):
-                    changes.append(_build_paragraph_change(old_sec.heading, op.old_paragraphs[i], op.new_paragraphs[i]))
+                    para_changes, para_already_detected = _build_paragraph_changes(
+                        old_sec.heading, op.old_paragraphs[i], op.new_paragraphs[i]
+                    )
+                    changes.extend(para_changes)
+                    already_detected_by_id.update(para_already_detected)
                 orphan_deletes += [(p, old_sec.heading) for p in op.old_paragraphs[paired:]]
                 orphan_inserts += [(p, new_sec.heading) for p in op.new_paragraphs[paired:]]
             elif op.tag == "delete":
@@ -94,7 +109,11 @@ def compare_documents(
     pending = [c for c in changes if c.change_type == "pending_llm_classification"]
     if pending:
         classifications = llm_classifier.classify_changes_batch([
-            {"change_id": c.change_id, "old_text": c.old_text, "new_text": c.new_text} for c in pending
+            {
+                "change_id": c.change_id, "old_text": c.old_text, "new_text": c.new_text,
+                "already_detected": already_detected_by_id.get(c.change_id, []),
+            }
+            for c in pending
         ])
         by_id = {cl.change_id: cl for cl in classifications}
         for c in changes:

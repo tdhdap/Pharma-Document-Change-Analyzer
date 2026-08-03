@@ -66,12 +66,17 @@ def test_compare_get_patch_and_export_flow(tmp_path, monkeypatch):
     })
     assert compare_resp.status_code == 200
     comparison = compare_resp.json()
-    assert comparison["summary"]["total_changes"] == 3
+    # 5 rows total: line 1 -> numeric_change; line 2 -> unit_change + numeric_change
+    # + one AI-classified row for the added humidity clause; line 3 -> one AI-classified
+    # role_responsibility_change row. See backend/app/regex_detectors.py's
+    # detect_all_regex_changes / strip_detected_values for why a single paragraph can
+    # now produce multiple rows.
+    assert comparison["summary"]["total_changes"] == 5
     comparison_id = comparison["comparison_id"]
 
     get_resp = client.get(f"/comparisons/{comparison_id}")
     assert get_resp.status_code == 200
-    assert get_resp.json()["summary"]["total_changes"] == 3
+    assert get_resp.json()["summary"]["total_changes"] == 5
 
     change_id = comparison["changes"][0]["change_id"]
     patch_resp = client.patch(f"/changes/{change_id}", json={"reviewer_risk_level": "Low", "accepted": True})

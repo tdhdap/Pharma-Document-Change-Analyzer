@@ -149,10 +149,33 @@ SCENARIO_A_V2 = [
     {"heading": "6.0 Calibration Frequency", "body": ["Calibrate the analytical balance every 30 days using a 200 g reference weight."]},
 ]
 
+# --- Scenario B: wording/reason changes, no structural change.
+# Heading convention: ALL-CAPS (no numbering prefix, no Word style, no TOC).
+
+SCENARIO_B_V1 = [
+    {"heading": "RECORD RETENTION", "body": ["The quality control department shall retain all batch records for five years."]},
+    {"heading": "SAMPLE HANDLING", "body": ["Samples must be thoroughly mixed prior to analysis."]},
+    {"heading": "APPROVAL RESPONSIBILITY", "body": ["The Production Supervisor shall verify equipment cleanliness before use."]},
+    {"heading": "REFERENCE DOCUMENT", "body": ["Follow the cleaning procedure described in the Master Cleaning SOP."]},
+    {"heading": "PROCESS SEQUENCE", "body": ["Calibrate the instrument, then perform the system suitability test, and finally begin sample analysis."]},
+    {"heading": "RESULT REPORTING", "body": ["Report results to two decimal places after review."]},
+]
+
+SCENARIO_B_V2 = [
+    {"heading": "RECORD RETENTION", "body": ["The Quality Control department shall retain all batch records for five years."]},
+    {"heading": "SAMPLE HANDLING", "body": ["Samples must be completely mixed prior to analysis."]},
+    {"heading": "APPROVAL RESPONSIBILITY", "body": ["The Quality Assurance Officer shall verify equipment cleanliness before use."]},
+    {"heading": "REFERENCE DOCUMENT", "body": ["Follow the cleaning procedure described in the Equipment Sanitation SOP."]},
+    {"heading": "PROCESS SEQUENCE", "body": ["Perform the system suitability test, then calibrate the instrument, and finally begin sample analysis."]},
+    {"heading": "RESULT REPORTING", "body": ["Report results to two decimal places after review and verification."]},
+]
+
 
 def main():
     generate_and_validate("A", "v1", SCENARIO_A_V1, STRUCTURAL)
     generate_and_validate("A", "v2", SCENARIO_A_V2, STRUCTURAL)
+    generate_and_validate("B", "v1", SCENARIO_B_V1, ALL_CAPS)
+    generate_and_validate("B", "v2", SCENARIO_B_V2, ALL_CAPS)
 
 
 if __name__ == "__main__":

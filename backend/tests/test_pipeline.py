@@ -137,3 +137,54 @@ def test_pending_change_never_leaks_when_llm_response_omits_it(monkeypatch):
     assert change.change_type != "pending_llm_classification"
     assert change.ai_risk_level == "Medium"
     assert change.confidence == 0.0
+
+
+def test_table_cell_deletion_gets_table_labeled_change_type():
+    old_paragraphs = [Paragraph(text="Old Row Value", from_table=True)]
+    new_paragraphs = []
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.source == "Table"
+    assert change.change_type == "deleted_table_content"
+    assert change.reason == "Table content removed."
+
+
+def test_table_cell_addition_gets_table_labeled_change_type():
+    old_paragraphs = []
+    new_paragraphs = [Paragraph(text="New Row Value", from_table=True)]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.source == "Table"
+    assert change.change_type == "added_table_content"
+    assert change.reason == "New table content added."
+
+
+def test_body_paragraph_addition_keeps_generic_change_type():
+    old_paragraphs = []
+    new_paragraphs = [Paragraph(text="New body sentence.")]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.source == "Body"
+    assert change.change_type == "added_paragraph"
+    assert change.reason == "New paragraph added."
+
+
+def test_table_cell_with_precise_regex_change_keeps_precise_type():
+    old_paragraphs = [Paragraph(text="Weigh 10 mg of sample.", from_table=True)]
+    new_paragraphs = [Paragraph(text="Weigh 20 mg of sample.", from_table=True)]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.source == "Table"
+    assert change.change_type == "numeric_change"

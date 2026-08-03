@@ -10,6 +10,7 @@ Orphan = tuple[Paragraph, str]
 def _build_paragraph_changes(
     section_heading: str, old_p: Paragraph, new_p: Paragraph
 ) -> tuple[list[Change], dict[str, list[str]]]:
+    source = "Table" if (old_p.from_table or new_p.from_table) else "Body"
     detections = regex_detectors.detect_all_regex_changes(old_p.text, new_p.text)
     changes: list[Change] = []
     for detection in detections:
@@ -17,7 +18,7 @@ def _build_paragraph_changes(
             change_id=str(uuid.uuid4()), section=section_heading, change_type=detection.change_type,
             old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
             confidence=detection.confidence, ai_risk_level=risk_rules.assign_risk(detection.change_type),
-            reason=detection.reason,
+            reason=detection.reason, source=source,
         ))
 
     already_detected_by_id: dict[str, list[str]] = {}
@@ -27,7 +28,7 @@ def _build_paragraph_changes(
         changes.append(Change(
             change_id=pending_id, section=section_heading, change_type="pending_llm_classification",
             old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
-            confidence=0.0, ai_risk_level="Medium", reason="",
+            confidence=0.0, ai_risk_level="Medium", reason="", source=source,
         ))
         already_detected_by_id[pending_id] = [d.change_type for d in detections]
 
@@ -82,28 +83,49 @@ def compare_documents(
     moved, remaining_deletes, remaining_inserts = move_reconciliation.reconcile_moves(orphan_deletes, orphan_inserts)
 
     for mv in moved:
+        source = "Table" if (mv.old_paragraph.from_table or mv.new_paragraph.from_table) else "Body"
+        if source == "Table":
+            change_type = "moved_table_content"
+            reason = f"Table content moved from '{mv.old_section}' to '{mv.new_section}'."
+        else:
+            change_type = "moved_paragraph"
+            reason = f"Paragraph moved from '{mv.old_section}' to '{mv.new_section}'."
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=f"{mv.old_section} -> {mv.new_section}",
-            change_type="moved_paragraph", old_text=mv.old_paragraph.text, new_text=mv.new_paragraph.text,
+            change_type=change_type, old_text=mv.old_paragraph.text, new_text=mv.new_paragraph.text,
             old_page=mv.old_paragraph.page, new_page=mv.new_paragraph.page, confidence=mv.score,
-            ai_risk_level=risk_rules.assign_risk("moved_paragraph"),
-            reason=f"Paragraph moved from '{mv.old_section}' to '{mv.new_section}'.",
+            ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=reason, source=source,
         ))
 
     for p, section in remaining_deletes:
+        source = "Table" if p.from_table else "Body"
+        if source == "Table":
+            change_type = "deleted_table_content"
+            reason = "Table content removed."
+        else:
+            change_type = "deleted_paragraph"
+            reason = "Paragraph removed."
         changes.append(Change(
-            change_id=str(uuid.uuid4()), section=section, change_type="deleted_paragraph",
+            change_id=str(uuid.uuid4()), section=section, change_type=change_type,
             old_text=p.text, new_text="", old_page=p.page, new_page=None,
-            confidence=1.0, ai_risk_level=risk_rules.assign_risk("deleted_paragraph"),
-            reason="Paragraph removed.",
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=reason, source=source,
         ))
 
     for p, section in remaining_inserts:
+        source = "Table" if p.from_table else "Body"
+        if source == "Table":
+            change_type = "added_table_content"
+            reason = "New table content added."
+        else:
+            change_type = "added_paragraph"
+            reason = "New paragraph added."
         changes.append(Change(
-            change_id=str(uuid.uuid4()), section=section, change_type="added_paragraph",
+            change_id=str(uuid.uuid4()), section=section, change_type=change_type,
             old_text="", new_text=p.text, old_page=None, new_page=p.page,
-            confidence=1.0, ai_risk_level=risk_rules.assign_risk("added_paragraph"),
-            reason="New paragraph added.",
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=reason, source=source,
         ))
 
     pending = [c for c in changes if c.change_type == "pending_llm_classification"]

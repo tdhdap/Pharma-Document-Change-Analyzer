@@ -1,6 +1,6 @@
 import uuid
 
-from app import sectioning, section_matching, paragraph_diff, move_reconciliation
+from app import sectioning, section_matching, section_structure, paragraph_diff, move_reconciliation
 from app import regex_detectors, llm_classifier, risk_rules
 from app.models import Paragraph, Change, ComparisonResult, build_summary
 
@@ -46,6 +46,12 @@ def compare_documents(
     match_result = section_matching.match_sections(old_sections, new_sections)
 
     changes: list[Change] = []
+    changes.extend(section_structure.detect_section_renumbering(
+        match_result.matches, old_sections, new_sections
+    ))
+    changes.extend(section_structure.detect_section_reordering(
+        match_result.matches, old_sections, new_sections
+    ))
     orphan_deletes: list[Orphan] = []
     orphan_inserts: list[Orphan] = []
     already_detected_by_id: dict[str, list[str]] = {}

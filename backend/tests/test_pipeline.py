@@ -188,3 +188,41 @@ def test_table_cell_with_precise_regex_change_keeps_precise_type():
     change = result.changes[0]
     assert change.source == "Table"
     assert change.change_type == "numeric_change"
+
+
+def test_pipeline_detects_renumbering_and_reordering_together():
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="2.0 Acceptance Criteria"),
+        Paragraph(text="Results shall conform to the specified limits."),
+        Paragraph(text="3.0 Approval"),
+        Paragraph(text="The Quality Assurance Manager shall approve results."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="2.0 Approval"),
+        Paragraph(text="The Quality Assurance Manager shall approve results."),
+        Paragraph(text="3.0 Acceptance Criteria"),
+        Paragraph(text="Results shall conform to the specified limits."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    renumbered = {c.old_text: c for c in result.changes if c.change_type == "section_renumbered"}
+    reordered = [c for c in result.changes if c.change_type == "section_reordered"]
+
+    assert set(renumbered.keys()) == {"2.0 Acceptance Criteria", "3.0 Approval"}
+    assert renumbered["2.0 Acceptance Criteria"].new_text == "3.0 Acceptance Criteria"
+    assert renumbered["2.0 Acceptance Criteria"].reason == "Section renumbered from '2.0' to '3.0'."
+    assert renumbered["3.0 Approval"].new_text == "2.0 Approval"
+    assert renumbered["3.0 Approval"].reason == "Section renumbered from '3.0' to '2.0'."
+    for c in renumbered.values():
+        assert c.ai_risk_level == "Informational"
+        assert c.source == "Body"
+
+    assert len(reordered) == 1
+    assert reordered[0].section == "2.0 Approval"
+    assert reordered[0].reason == "Section moved from position 3 to position 2 in the document."
+    assert reordered[0].ai_risk_level == "Informational"

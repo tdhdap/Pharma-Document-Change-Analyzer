@@ -170,12 +170,85 @@ SCENARIO_B_V2 = [
     {"heading": "RESULT REPORTING", "body": ["Report results to two decimal places after review and verification."]},
 ]
 
+# --- Scenario C1: heavy renumbering, reordering, duplicate heading text,
+# section deletion (v1 has "4.0 Batch Record Archival", v2 doesn't) and
+# section addition. Heading convention: mixed (alternating Word-style/TOC
+# and plain-numbered-text-only) -- the exact shape of the swallowing bug
+# the heading-detection plan's Task 1 fixed.
+#
+# Note: the original C1_v1.txt/C1_v2.txt body line under "7.0 Analytical
+# Results Table" reads "10.5 | 20.3 | conforms". Verified directly against
+# the current (unmodified, already-shipped) backend/app/sectioning.py: this
+# text matches HEADING_NUMBER_PATTERN (r"^\s*\d+(\.\d+)+\s+\S.*$") -- "10.5"
+# looks exactly like a heading number -- so it gets split out as its own
+# spurious one-line heading/section, identically for the original TXT file
+# and for these DOCX/PDF translations (sectioning.py runs unchanged
+# regardless of source format). This is a pre-existing latent false-positive
+# shape in already-reviewed, already-shipped code, not something introduced
+# by this plan -- fixing it is out of scope here (would require its own
+# spec/plan/review cycle). The fixture text below is reworded to
+# "Result: 10.5, 20.3, conforms" (does not start with digits, so it can
+# never match the pattern) solely to avoid tripping this edge case in an
+# otherwise-unrelated fixture-generation task. Do not "fix" this by editing
+# backend/app/sectioning.py -- that file is out of scope for this entire
+# plan.
+
+SCENARIO_C1_V1 = [
+    {"heading": "1.0 Scope", "body": ["This procedure applies to all analytical testing performed in the QC laboratory."]},
+    {"heading": "2.0 Sample Preparation", "body": ["Dilute the sample to 100 mL with mobile phase before injection."]},
+    {"heading": "3.0 Quality Review", "body": ["The Quality Assurance reviewer shall check all raw data for transcription errors."]},
+    {"heading": "3.0 Quality Review", "body": ["A supervisor shall countersign the quality review checklist prior to submission."]},
+    {"heading": "4.0 Batch Record Archival", "body": ["Completed batch records shall be archived in the document control room for ten years."]},
+    {"heading": "5.0 Equipment Qualification", "body": ["All analytical balances shall be requalified annually by the metrology team."]},
+    {"heading": "6.0 Documentation Review", "body": ["A second analyst shall independently review all calculations before batch release."]},
+    {"heading": "7.0 Analytical Results Table", "body": ["Results are summarized below.", "Result: 10.5, 20.3, conforms"]},
+    {"heading": "8.0 Final Disposition", "body": ["The QA Manager shall issue the final batch disposition after all reviews are complete.", "The stability chamber log shall be filed with the batch record."]},
+]
+
+SCENARIO_C1_V2 = [
+    {"heading": "1.0 Scope", "body": ["This procedure applies to all analytical testing performed in the QC laboratory."]},
+    {"heading": "3.0 Quality Review", "body": ["The Quality Assurance reviewer shall check all raw data for transcription errors."]},
+    {"heading": "3.0 Quality Review", "body": ["A supervisor shall countersign the quality review checklist prior to submission."]},
+    {"heading": "6.5 Documentation Review", "body": ["A second analyst shall independently review all calculations before batch release."]},
+    {"heading": "7.0 Analytical Results Table", "body": ["Results are summarized below.", "Result: 10.5, 20.3, conforms"]},
+    {"heading": "2.0 Sample Preparation", "body": ["Dilute the sample to 100 mL with mobile phase before injection."]},
+    {"heading": "5.0 Qualifying the Equipment", "body": ["All analytical balances shall be requalified annually by the metrology team."]},
+    {"heading": "8.0 Final Disposition", "body": ["The QA Manager shall issue the final batch disposition after all reviews are complete."]},
+    {"heading": "9.0 Environmental Monitoring", "body": ["Environmental monitoring of the manufacturing area shall be performed weekly using settle plates."]},
+    {"heading": "10.0 Long-Term Sample Retention", "body": ["The stability chamber log shall be filed together with the batch record for long-term retention."]},
+]
+
+# --- Scenario C2: plain paragraphs, no headings at all (matches the
+# original TXT content exactly). Heading convention: none.
+
+SCENARIO_C2_V1 = [
+    {"heading": None, "body": [
+        "All personnel entering the cleanroom must wear appropriate gowning including gloves, mask, and coverall.",
+        "Hand sanitization is required immediately before gowning and after any interruption in cleanroom work.",
+        "Environmental monitoring samples are collected weekly by the quality control team.",
+        "Any excursion from the established alert limits must be reported to the Quality Assurance Manager within 24 hours.",
+    ]},
+]
+
+SCENARIO_C2_V2 = [
+    {"heading": None, "body": [
+        "All personnel entering the cleanroom must wear appropriate gowning including gloves, mask, coverall, and safety glasses.",
+        "Hand sanitization is required immediately before gowning and after any interruption in cleanroom work.",
+        "Environmental monitoring samples are collected weekly by the quality control team.",
+        "Any excursion from the established alert limits must be reported to the Quality Assurance Manager within 12 hours.",
+    ]},
+]
+
 
 def main():
     generate_and_validate("A", "v1", SCENARIO_A_V1, STRUCTURAL)
     generate_and_validate("A", "v2", SCENARIO_A_V2, STRUCTURAL)
     generate_and_validate("B", "v1", SCENARIO_B_V1, ALL_CAPS)
     generate_and_validate("B", "v2", SCENARIO_B_V2, ALL_CAPS)
+    generate_and_validate("C1", "v1", SCENARIO_C1_V1, MIXED)
+    generate_and_validate("C1", "v2", SCENARIO_C1_V2, MIXED)
+    generate_and_validate("C2", "v1", SCENARIO_C2_V1, NONE_CONVENTION)
+    generate_and_validate("C2", "v2", SCENARIO_C2_V2, NONE_CONVENTION)
 
 
 if __name__ == "__main__":

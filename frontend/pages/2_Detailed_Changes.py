@@ -32,6 +32,7 @@ else:
     st.table([
         {
             "Section": c["section"],
+            "Source": c["source"],
             "Old Text": c["old_text"],
             "New Text": c["new_text"],
             "Change Type": c["change_type"],

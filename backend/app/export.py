@@ -25,6 +25,7 @@ def to_json(comparison: ComparisonResult) -> dict:
                 "change_id": c.change_id,
                 "section": c.section,
                 "change_type": c.change_type,
+                "source": c.source,
                 "old_text": c.old_text,
                 "new_text": c.new_text,
                 "risk_level": _effective_risk(c),
@@ -46,13 +47,13 @@ def to_csv(comparison: ComparisonResult) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "change_id", "section", "change_type", "old_text", "new_text",
+        "change_id", "section", "change_type", "source", "old_text", "new_text",
         "risk_level", "reason", "old_page", "new_page", "confidence",
         "reviewer_comment", "accepted",
     ])
     for c in comparison.changes:
         writer.writerow([
-            c.change_id, c.section, c.change_type, c.old_text, c.new_text,
+            c.change_id, c.section, c.change_type, c.source, c.old_text, c.new_text,
             _effective_risk(c), c.reason, c.old_page, c.new_page,
             c.confidence, c.reviewer_comment or "", c.accepted,
         ])

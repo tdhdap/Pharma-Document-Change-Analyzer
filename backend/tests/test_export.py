@@ -54,3 +54,25 @@ def test_to_csv_has_header_and_one_row_per_change():
     assert rows[0][:3] == ["change_id", "section", "change_type"]
     assert len(rows) == 2
     assert rows[1][0] == "ch-1"
+
+
+def test_to_json_includes_source_field():
+    comparison = make_comparison()
+    comparison.changes[0].source = "Table"
+    result = to_json(comparison)
+    assert result["changes"][0]["source"] == "Table"
+
+
+def test_to_json_defaults_source_to_body():
+    result = to_json(make_comparison())
+    assert result["changes"][0]["source"] == "Body"
+
+
+def test_to_csv_includes_source_column():
+    comparison = make_comparison()
+    comparison.changes[0].source = "Table"
+    csv_text = to_csv(comparison)
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    assert "source" in rows[0]
+    source_index = rows[0].index("source")
+    assert rows[1][source_index] == "Table"

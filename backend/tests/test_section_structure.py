@@ -1,6 +1,7 @@
 from app.models import Section, Paragraph, SectionMatch
 from app.section_structure import (
-    detect_section_renumbering, detect_section_reordering, detect_section_added,
+    detect_section_renumbering, detect_section_reordering,
+    detect_section_added, detect_section_deleted,
 )
 
 
@@ -273,3 +274,54 @@ def test_only_inserted_indices_are_flagged_among_several_sections():
 
     assert len(changes) == 1
     assert changes[0].section == "2.0 New Section"
+
+
+def test_deleted_section_with_body_is_detected():
+    old_sections = [
+        Section(heading="7.0 Storage", paragraphs=[Paragraph(text="unchanged", page=5)]),
+        Section(heading="8.0 Deviation Handling", paragraphs=[
+            Paragraph(text="Any deviation from this procedure shall be documented.", page=6),
+        ]),
+    ]
+
+    changes = detect_section_deleted([1], old_sections)
+
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.change_type == "section_deleted"
+    assert c.section == "8.0 Deviation Handling"
+    assert c.old_text == "8.0 Deviation Handling\nAny deviation from this procedure shall be documented."
+    assert c.new_text == ""
+    assert c.reason == "Section deleted: '8.0 Deviation Handling'."
+    assert c.ai_risk_level == "High"
+    assert c.source == "Body"
+    assert c.confidence == 1.0
+    assert c.old_page == 6
+    assert c.new_page is None
+
+
+def test_heading_only_deleted_section_is_still_detected():
+    old_sections = [Section(heading="9.0 Reserved", paragraphs=[])]
+
+    changes = detect_section_deleted([0], old_sections)
+
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.old_text == "9.0 Reserved"
+    assert c.new_text == ""
+    assert c.old_page is None
+
+
+def test_synthetic_heading_deleted_section_is_not_flagged():
+    old_sections = [Section(heading="Paragraph 3", paragraphs=[Paragraph(text="body")])]
+
+    assert detect_section_deleted([0], old_sections) == []
+
+
+def test_table_sourced_deleted_section_is_labeled_table():
+    old_sections = [Section(heading="4.0 Limits", paragraphs=[Paragraph(text="cell value", from_table=True)])]
+
+    changes = detect_section_deleted([0], old_sections)
+
+    assert len(changes) == 1
+    assert changes[0].source == "Table"

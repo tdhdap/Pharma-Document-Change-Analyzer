@@ -125,3 +125,25 @@ def detect_section_added(
             reason=f"New section added: '{section.heading}'.", source=source,
         ))
     return changes
+
+
+def detect_section_deleted(
+    deleted_indices: list[int],
+    old_sections: list[Section],
+) -> list[Change]:
+    changes: list[Change] = []
+    for idx in deleted_indices:
+        section = old_sections[idx]
+        if is_synthetic_heading(section.heading):
+            continue
+        change_type = "section_deleted"
+        old_text = "\n".join([section.heading] + [p.text for p in section.paragraphs])
+        old_page = section.paragraphs[0].page if section.paragraphs else None
+        source = "Table" if any(p.from_table for p in section.paragraphs) else "Body"
+        changes.append(Change(
+            change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
+            old_text=old_text, new_text="", old_page=old_page, new_page=None,
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=f"Section deleted: '{section.heading}'.", source=source,
+        ))
+    return changes

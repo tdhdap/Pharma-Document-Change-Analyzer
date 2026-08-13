@@ -34,3 +34,7 @@ def test_section_reordered_is_informational_risk():
 
 def test_section_added_is_high_risk():
     assert assign_risk("section_added") == "High"
+
+
+def test_section_deleted_is_high_risk():
+    assert assign_risk("section_deleted") == "High"

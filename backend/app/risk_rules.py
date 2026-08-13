@@ -10,6 +10,7 @@ RISK_TABLE = {
     "formatting_only": "Informational",
     "section_renumbered": "Informational",
     "section_reordered": "Informational",
+    "section_added": "High",
 }
 
 DEFAULT_RISK = "Medium"

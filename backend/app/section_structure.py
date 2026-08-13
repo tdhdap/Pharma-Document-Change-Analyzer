@@ -67,7 +67,7 @@ def _longest_increasing_subsequence_indices(values: list[int]) -> set[int]:
 _SYNTHETIC_HEADING_PATTERN = re.compile(r"^Paragraph \d+$")
 
 
-def _is_synthetic_heading(heading: str) -> bool:
+def is_synthetic_heading(heading: str) -> bool:
     return heading == "Preamble" or bool(_SYNTHETIC_HEADING_PATTERN.match(heading))
 
 
@@ -89,7 +89,7 @@ def detect_section_reordering(
             continue
         old_heading = old_sections[m.old_index].heading
         new_heading = new_sections[m.new_index].heading
-        if _is_synthetic_heading(old_heading) or _is_synthetic_heading(new_heading):
+        if is_synthetic_heading(old_heading) or is_synthetic_heading(new_heading):
             continue
         change_type = "section_reordered"
         reason = (
@@ -101,5 +101,27 @@ def detect_section_reordering(
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source="Body",
+        ))
+    return changes
+
+
+def detect_section_added(
+    inserted_indices: list[int],
+    new_sections: list[Section],
+) -> list[Change]:
+    changes: list[Change] = []
+    for idx in inserted_indices:
+        section = new_sections[idx]
+        if is_synthetic_heading(section.heading):
+            continue
+        change_type = "section_added"
+        new_text = "\n".join([section.heading] + [p.text for p in section.paragraphs])
+        new_page = section.paragraphs[0].page if section.paragraphs else None
+        source = "Table" if any(p.from_table for p in section.paragraphs) else "Body"
+        changes.append(Change(
+            change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
+            old_text="", new_text=new_text, old_page=None, new_page=new_page,
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=f"New section added: '{section.heading}'.", source=source,
         ))
     return changes

@@ -1,5 +1,7 @@
 from app.models import Section, Paragraph, SectionMatch
-from app.section_structure import detect_section_renumbering, detect_section_reordering
+from app.section_structure import (
+    detect_section_renumbering, detect_section_reordering, detect_section_added,
+)
 
 
 def test_pure_renumber_is_detected():
@@ -203,3 +205,71 @@ def test_section_that_jumps_ahead_of_others_is_flagged():
     assert c.confidence == 1.0
     assert c.old_page is None
     assert c.new_page is None
+
+
+def test_new_section_with_body_is_detected():
+    new_sections = [
+        Section(heading="1.0 Scope", paragraphs=[Paragraph(text="existing", page=1)]),
+        Section(heading="5.0 Environmental Monitoring", paragraphs=[
+            Paragraph(text="Environmental monitoring of the manufacturing area shall be performed weekly.", page=3),
+            Paragraph(text="Settle plates shall be used at each critical location.", page=3),
+        ]),
+    ]
+
+    changes = detect_section_added([1], new_sections)
+
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.change_type == "section_added"
+    assert c.section == "5.0 Environmental Monitoring"
+    assert c.old_text == ""
+    assert c.new_text == (
+        "5.0 Environmental Monitoring\n"
+        "Environmental monitoring of the manufacturing area shall be performed weekly.\n"
+        "Settle plates shall be used at each critical location."
+    )
+    assert c.reason == "New section added: '5.0 Environmental Monitoring'."
+    assert c.ai_risk_level == "High"
+    assert c.source == "Body"
+    assert c.confidence == 1.0
+    assert c.old_page is None
+    assert c.new_page == 3
+
+
+def test_heading_only_new_section_is_still_detected():
+    new_sections = [Section(heading="9.0 Reserved", paragraphs=[])]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.old_text == ""
+    assert c.new_text == "9.0 Reserved"
+    assert c.new_page is None
+
+
+def test_synthetic_heading_new_section_is_not_flagged():
+    new_sections = [Section(heading="Paragraph 1", paragraphs=[Paragraph(text="body")])]
+
+    assert detect_section_added([0], new_sections) == []
+
+
+def test_table_sourced_new_section_is_labeled_table():
+    new_sections = [Section(heading="4.0 Limits", paragraphs=[Paragraph(text="cell value", from_table=True)])]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].source == "Table"
+
+
+def test_only_inserted_indices_are_flagged_among_several_sections():
+    new_sections = [
+        Section(heading="1.0 Scope", paragraphs=[Paragraph(text="unchanged")]),
+        Section(heading="2.0 New Section", paragraphs=[Paragraph(text="added content")]),
+    ]
+
+    changes = detect_section_added([1], new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].section == "2.0 New Section"

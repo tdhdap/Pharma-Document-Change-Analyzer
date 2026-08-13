@@ -76,3 +76,15 @@ def test_to_csv_includes_source_column():
     assert "source" in rows[0]
     source_index = rows[0].index("source")
     assert rows[1][source_index] == "Table"
+
+
+def test_to_csv_correctly_quotes_embedded_newlines():
+    comparison = make_comparison()
+    comparison.changes[0].new_text = "Heading\nParagraph one.\nParagraph two."
+    csv_text = to_csv(comparison)
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    # Header + 1 data row - embedded newlines inside a quoted field must not be
+    # mistaken for row boundaries by a proper CSV reader.
+    assert len(rows) == 2
+    new_text_index = rows[0].index("new_text")
+    assert rows[1][new_text_index] == "Heading\nParagraph one.\nParagraph two."

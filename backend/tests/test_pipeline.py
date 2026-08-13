@@ -296,3 +296,35 @@ def test_pipeline_headingless_paragraph_addition_still_uses_added_paragraph():
     change = result.changes[0]
     assert change.change_type == "added_paragraph"
     assert change.ai_risk_level != "High"
+
+
+def test_pipeline_content_moved_into_a_new_section_is_reported_as_moved_not_deleted():
+    # Regression test for the final-review finding: content relocating from a
+    # matched section into a brand-new section must still produce moved_paragraph,
+    # not a false deleted_paragraph plus a duplicated line inside section_added.
+    old_paragraphs = [
+        Paragraph(text="1.0 Materials"),
+        Paragraph(text="All raw materials shall be inspected upon receipt for identity and quality."),
+        Paragraph(text="Material shall not be used beyond 24 months from the date of manufacture."),
+        Paragraph(text="2.0 Approval"),
+        Paragraph(text="The Quality Assurance Manager shall approve results."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Materials"),
+        Paragraph(text="All raw materials shall be inspected upon receipt for identity and quality."),
+        Paragraph(text="2.0 Approval"),
+        Paragraph(text="The Quality Assurance Manager shall approve results."),
+        Paragraph(text="3.0 Storage and Shelf Life"),
+        Paragraph(text="Material shall not be used beyond 24 months from the date of manufacture."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert "deleted_paragraph" not in change_types
+    moved = [c for c in result.changes if c.change_type == "moved_paragraph"]
+    assert len(moved) == 1
+    assert moved[0].old_text == "Material shall not be used beyond 24 months from the date of manufacture."
+    section_added = [c for c in result.changes if c.change_type == "section_added"]
+    assert len(section_added) == 1
+    assert section_added[0].new_text == "3.0 Storage and Shelf Life"

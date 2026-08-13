@@ -52,12 +52,6 @@ def compare_documents(
     changes.extend(section_structure.detect_section_reordering(
         match_result.matches, old_sections, new_sections
     ))
-    changes.extend(section_structure.detect_section_added(
-        match_result.inserted_indices, new_sections
-    ))
-    changes.extend(section_structure.detect_section_deleted(
-        match_result.deleted_indices, old_sections
-    ))
     orphan_deletes: list[Orphan] = []
     orphan_inserts: list[Orphan] = []
     already_detected_by_id: dict[str, list[str]] = {}
@@ -85,16 +79,31 @@ def compare_documents(
             elif op.tag == "insert":
                 orphan_inserts += [(p, new_sec.heading) for p in op.new_paragraphs]
 
+    whole_deleted_paragraph_ids: set[int] = set()
     for idx in match_result.deleted_indices:
         sec = old_sections[idx]
-        if section_structure.is_synthetic_heading(sec.heading):
-            orphan_deletes += [(p, sec.heading) for p in sec.paragraphs]
+        orphan_deletes += [(p, sec.heading) for p in sec.paragraphs]
+        if not section_structure.is_synthetic_heading(sec.heading):
+            whole_deleted_paragraph_ids.update(id(p) for p in sec.paragraphs)
+
+    whole_inserted_paragraph_ids: set[int] = set()
     for idx in match_result.inserted_indices:
         sec = new_sections[idx]
-        if section_structure.is_synthetic_heading(sec.heading):
-            orphan_inserts += [(p, sec.heading) for p in sec.paragraphs]
+        orphan_inserts += [(p, sec.heading) for p in sec.paragraphs]
+        if not section_structure.is_synthetic_heading(sec.heading):
+            whole_inserted_paragraph_ids.update(id(p) for p in sec.paragraphs)
 
     moved, remaining_deletes, remaining_inserts = move_reconciliation.reconcile_moves(orphan_deletes, orphan_inserts)
+
+    moved_old_paragraph_ids = {id(mv.old_paragraph) for mv in moved}
+    moved_new_paragraph_ids = {id(mv.new_paragraph) for mv in moved}
+
+    changes.extend(section_structure.detect_section_added(
+        match_result.inserted_indices, new_sections, excluded_paragraph_ids=moved_new_paragraph_ids
+    ))
+    changes.extend(section_structure.detect_section_deleted(
+        match_result.deleted_indices, old_sections, excluded_paragraph_ids=moved_old_paragraph_ids
+    ))
 
     for mv in moved:
         source = "Table" if (mv.old_paragraph.from_table or mv.new_paragraph.from_table) else "Body"
@@ -113,6 +122,8 @@ def compare_documents(
         ))
 
     for p, section in remaining_deletes:
+        if id(p) in whole_deleted_paragraph_ids:
+            continue
         source = "Table" if p.from_table else "Body"
         if source == "Table":
             change_type = "deleted_table_content"
@@ -128,6 +139,8 @@ def compare_documents(
         ))
 
     for p, section in remaining_inserts:
+        if id(p) in whole_inserted_paragraph_ids:
+            continue
         source = "Table" if p.from_table else "Body"
         if source == "Table":
             change_type = "added_table_content"

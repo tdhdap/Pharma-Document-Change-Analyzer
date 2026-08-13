@@ -325,3 +325,25 @@ def test_table_sourced_deleted_section_is_labeled_table():
 
     assert len(changes) == 1
     assert changes[0].source == "Table"
+
+
+def test_excluded_paragraph_ids_are_omitted_from_added_section_text():
+    p1 = Paragraph(text="This paragraph relocated from elsewhere.", page=2)
+    p2 = Paragraph(text="This paragraph is genuinely new.", page=2)
+    new_sections = [Section(heading="5.0 New Section", paragraphs=[p1, p2])]
+
+    changes = detect_section_added([0], new_sections, excluded_paragraph_ids={id(p1)})
+
+    assert len(changes) == 1
+    assert changes[0].new_text == "5.0 New Section\nThis paragraph is genuinely new."
+
+
+def test_excluded_paragraph_ids_are_omitted_from_deleted_section_text():
+    p1 = Paragraph(text="This paragraph relocated elsewhere.", page=2)
+    p2 = Paragraph(text="This paragraph is genuinely removed.", page=2)
+    old_sections = [Section(heading="8.0 Old Section", paragraphs=[p1, p2])]
+
+    changes = detect_section_deleted([0], old_sections, excluded_paragraph_ids={id(p1)})
+
+    assert len(changes) == 1
+    assert changes[0].old_text == "8.0 Old Section\nThis paragraph is genuinely removed."

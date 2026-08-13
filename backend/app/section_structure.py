@@ -108,16 +108,19 @@ def detect_section_reordering(
 def detect_section_added(
     inserted_indices: list[int],
     new_sections: list[Section],
+    excluded_paragraph_ids: set[int] | None = None,
 ) -> list[Change]:
+    excluded_paragraph_ids = excluded_paragraph_ids or set()
     changes: list[Change] = []
     for idx in inserted_indices:
         section = new_sections[idx]
         if is_synthetic_heading(section.heading):
             continue
         change_type = "section_added"
-        new_text = "\n".join([section.heading] + [p.text for p in section.paragraphs])
-        new_page = section.paragraphs[0].page if section.paragraphs else None
-        source = "Table" if any(p.from_table for p in section.paragraphs) else "Body"
+        remaining_paragraphs = [p for p in section.paragraphs if id(p) not in excluded_paragraph_ids]
+        new_text = "\n".join([section.heading] + [p.text for p in remaining_paragraphs])
+        new_page = remaining_paragraphs[0].page if remaining_paragraphs else None
+        source = "Table" if any(p.from_table for p in remaining_paragraphs) else "Body"
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
             old_text="", new_text=new_text, old_page=None, new_page=new_page,
@@ -130,16 +133,19 @@ def detect_section_added(
 def detect_section_deleted(
     deleted_indices: list[int],
     old_sections: list[Section],
+    excluded_paragraph_ids: set[int] | None = None,
 ) -> list[Change]:
+    excluded_paragraph_ids = excluded_paragraph_ids or set()
     changes: list[Change] = []
     for idx in deleted_indices:
         section = old_sections[idx]
         if is_synthetic_heading(section.heading):
             continue
         change_type = "section_deleted"
-        old_text = "\n".join([section.heading] + [p.text for p in section.paragraphs])
-        old_page = section.paragraphs[0].page if section.paragraphs else None
-        source = "Table" if any(p.from_table for p in section.paragraphs) else "Body"
+        remaining_paragraphs = [p for p in section.paragraphs if id(p) not in excluded_paragraph_ids]
+        old_text = "\n".join([section.heading] + [p.text for p in remaining_paragraphs])
+        old_page = remaining_paragraphs[0].page if remaining_paragraphs else None
+        source = "Table" if any(p.from_table for p in remaining_paragraphs) else "Body"
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
             old_text=old_text, new_text="", old_page=old_page, new_page=None,

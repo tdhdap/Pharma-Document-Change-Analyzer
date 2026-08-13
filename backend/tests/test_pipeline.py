@@ -228,3 +228,71 @@ def test_pipeline_detects_renumbering_and_reordering_together():
     assert reordered[0].new_text == "2.0 Approval"
     assert reordered[0].reason == "Section moved from position 3 to position 2 in the document."
     assert reordered[0].ai_risk_level == "Informational"
+
+
+def test_pipeline_reports_a_new_section_as_section_added_not_scattered_paragraphs():
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="2.0 Environmental Monitoring"),
+        Paragraph(text="Environmental monitoring shall be performed weekly using settle plates."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    assert result.summary.total_changes == 1
+    change = result.changes[0]
+    assert change.change_type == "section_added"
+    assert change.section == "2.0 Environmental Monitoring"
+    assert change.new_text == (
+        "2.0 Environmental Monitoring\n"
+        "Environmental monitoring shall be performed weekly using settle plates."
+    )
+    assert change.ai_risk_level == "High"
+
+
+def test_pipeline_reports_a_deleted_section_as_section_deleted_not_scattered_paragraphs():
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="8.0 Deviation Handling"),
+        Paragraph(text="Any deviation from this procedure shall be documented and approved."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    assert result.summary.total_changes == 1
+    change = result.changes[0]
+    assert change.change_type == "section_deleted"
+    assert change.section == "8.0 Deviation Handling"
+    assert change.old_text == (
+        "8.0 Deviation Handling\n"
+        "Any deviation from this procedure shall be documented and approved."
+    )
+    assert change.ai_risk_level == "High"
+
+
+def test_pipeline_headingless_paragraph_addition_still_uses_added_paragraph():
+    # Regression guard: sectioning.py wraps a headingless document's paragraphs in
+    # synthetic "Paragraph N" sections. Without the synthetic-heading guard, this
+    # would get misreported as a High-risk section_added instead of the existing
+    # Medium-risk added_paragraph. This mirrors the pre-existing
+    # test_body_paragraph_addition_keeps_generic_change_type case but asserts the
+    # change_type explicitly against this plan's new code path.
+    old_paragraphs = []
+    new_paragraphs = [Paragraph(text="New body sentence with no heading anywhere.")]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    assert result.summary.total_changes == 1
+    change = result.changes[0]
+    assert change.change_type == "added_paragraph"
+    assert change.ai_risk_level != "High"

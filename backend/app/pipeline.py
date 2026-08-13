@@ -52,6 +52,12 @@ def compare_documents(
     changes.extend(section_structure.detect_section_reordering(
         match_result.matches, old_sections, new_sections
     ))
+    changes.extend(section_structure.detect_section_added(
+        match_result.inserted_indices, new_sections
+    ))
+    changes.extend(section_structure.detect_section_deleted(
+        match_result.deleted_indices, old_sections
+    ))
     orphan_deletes: list[Orphan] = []
     orphan_inserts: list[Orphan] = []
     already_detected_by_id: dict[str, list[str]] = {}
@@ -81,10 +87,12 @@ def compare_documents(
 
     for idx in match_result.deleted_indices:
         sec = old_sections[idx]
-        orphan_deletes += [(p, sec.heading) for p in sec.paragraphs]
+        if section_structure.is_synthetic_heading(sec.heading):
+            orphan_deletes += [(p, sec.heading) for p in sec.paragraphs]
     for idx in match_result.inserted_indices:
         sec = new_sections[idx]
-        orphan_inserts += [(p, sec.heading) for p in sec.paragraphs]
+        if section_structure.is_synthetic_heading(sec.heading):
+            orphan_inserts += [(p, sec.heading) for p in sec.paragraphs]
 
     moved, remaining_deletes, remaining_inserts = move_reconciliation.reconcile_moves(orphan_deletes, orphan_inserts)
 

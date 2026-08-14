@@ -20,3 +20,17 @@ def build_change_update_payload(edited_row: dict, original_row: dict) -> dict:
         if edited_row.get(field) != original_row.get(field):
             payload[field] = edited_row.get(field)
     return payload
+
+
+def format_table_cell(old_position: dict | None, new_position: dict | None) -> str:
+    if old_position is None and new_position is None:
+        return ""
+    if old_position is not None and new_position is not None and old_position == new_position:
+        return f"Table {old_position['table_id']}, Row {old_position['row']}, Col {old_position['col']}"
+    if old_position is not None and new_position is not None:
+        return (
+            f"Table {old_position['table_id']}, Row {old_position['row']}, Col {old_position['col']} -> "
+            f"Table {new_position['table_id']}, Row {new_position['row']}, Col {new_position['col']}"
+        )
+    position = new_position or old_position
+    return f"Table {position['table_id']}, Row {position['row']}, Col {position['col']}"

@@ -1,6 +1,6 @@
 import streamlit as st
 
-from logic import filter_changes
+from logic import filter_changes, format_table_cell
 from bootstrap import ensure_backend_running
 
 st.set_page_config(layout="wide")
@@ -33,6 +33,7 @@ else:
         {
             "Section": c["section"],
             "Source": c.get("source", "Body"),
+            "Table Cell": format_table_cell(c.get("old_table_position"), c.get("new_table_position")),
             "Old Text": c["old_text"],
             "New Text": c["new_text"],
             "Change Type": c["change_type"],

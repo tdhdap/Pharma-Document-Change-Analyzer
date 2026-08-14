@@ -667,3 +667,146 @@ def test_extract_docx_table_inside_header_has_from_table_true(tmp_path):
     cell_para = next(p for p in paragraphs if p.text == "Header Table Cell")
 
     assert cell_para.from_table is True
+
+
+def test_extract_docx_table_cell_gets_correct_grid_coordinate(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "TopLeft"
+    table.cell(0, 1).text = "TopRight"
+    table.cell(1, 0).text = "BottomLeft"
+    table.cell(1, 1).text = "BottomRight"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    assert by_text["TopLeft"].table_position.row == 0
+    assert by_text["TopLeft"].table_position.col == 0
+    assert by_text["TopRight"].table_position.row == 0
+    assert by_text["TopRight"].table_position.col == 1
+    assert by_text["BottomLeft"].table_position.row == 1
+    assert by_text["BottomLeft"].table_position.col == 0
+    assert by_text["BottomRight"].table_position.row == 1
+    assert by_text["BottomRight"].table_position.col == 1
+    # All four cells belong to the same (only) table in the document.
+    table_ids = {p.table_position.table_id for p in by_text.values()}
+    assert len(table_ids) == 1
+
+
+def test_extract_docx_non_table_paragraph_has_no_table_position(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("1.0 Scope", style="Heading 1")
+    doc.add_paragraph("This procedure applies to all lab testing.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert all(p.table_position is None for p in paragraphs)
+
+
+def test_extract_docx_horizontally_merged_cell_anchors_at_top_left(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(0, 0).text = "MERGED HEADER CELL"
+    table.cell(1, 0).text = "A"
+    table.cell(1, 1).text = "B"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    assert by_text["MERGED HEADER CELL"].table_position.row == 0
+    assert by_text["MERGED HEADER CELL"].table_position.col == 0
+    assert by_text["A"].table_position.row == 1
+    assert by_text["A"].table_position.col == 0
+    assert by_text["B"].table_position.row == 1
+    assert by_text["B"].table_position.col == 1
+
+
+def test_extract_docx_vertically_merged_cell_anchors_at_top_left(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(1, 0))
+    table.cell(0, 0).text = "VMERGED"
+    table.cell(0, 1).text = "TOP RIGHT"
+    table.cell(1, 1).text = "BOTTOM RIGHT"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    assert by_text["VMERGED"].table_position.row == 0
+    assert by_text["VMERGED"].table_position.col == 0
+    assert by_text["TOP RIGHT"].table_position.row == 0
+    assert by_text["TOP RIGHT"].table_position.col == 1
+    assert by_text["BOTTOM RIGHT"].table_position.row == 1
+    assert by_text["BOTTOM RIGHT"].table_position.col == 1
+
+
+def test_extract_docx_multiple_body_tables_get_distinct_sequential_ids(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    first_table = doc.add_table(rows=1, cols=1)
+    first_table.cell(0, 0).text = "First Table Cell"
+    doc.add_paragraph("Some text between the two tables.")
+    second_table = doc.add_table(rows=1, cols=1)
+    second_table.cell(0, 0).text = "Second Table Cell"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    first_id = by_text["First Table Cell"].table_position.table_id
+    second_id = by_text["Second Table Cell"].table_position.table_id
+    assert first_id != second_id
+    assert second_id > first_id
+
+
+def test_extract_docx_body_and_header_tables_share_the_global_id_counter(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    body_table = doc.add_table(rows=1, cols=1)
+    body_table.cell(0, 0).text = "Body Table Cell"
+    doc.add_paragraph("Body content here.")
+    header = doc.sections[0].header
+    header.paragraphs[0].text = "SOP-1234"
+    header_table = header.add_table(rows=1, cols=1, width=Inches(6))
+    header_table.cell(0, 0).text = "Header Table Cell"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    body_id = by_text["Body Table Cell"].table_position.table_id
+    header_id = by_text["Header Table Cell"].table_position.table_id
+    assert body_id != header_id
+
+
+def test_extract_docx_nested_table_gets_its_own_table_id_and_coordinates(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    outer_table = doc.add_table(rows=1, cols=2)
+    outer_table.cell(0, 0).text = "Outer Cell"
+    nested_table = outer_table.cell(0, 1).add_table(rows=1, cols=1)
+    nested_table.cell(0, 0).text = "Nested Cell"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    by_text = {p.text: p for p in paragraphs}
+
+    outer_position = by_text["Outer Cell"].table_position
+    nested_position = by_text["Nested Cell"].table_position
+
+    assert outer_position.table_id != nested_position.table_id
+    # The nested table's own single cell is at its own grid position (0, 0),
+    # not the outer cell's position (0, 1) that contains it.
+    assert nested_position.row == 0
+    assert nested_position.col == 0
+    assert outer_position.row == 0
+    assert outer_position.col == 0

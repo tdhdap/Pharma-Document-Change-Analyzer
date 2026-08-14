@@ -1,11 +1,12 @@
 import collections
+import itertools
 
 import fitz
 from docx import Document as DocxDocument
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
 
-from app.models import Paragraph
+from app.models import Paragraph, TableCoordinate
 from app.sectioning import _looks_like_heading_shape
 
 HEADING_STYLE_PREFIXES = ("Heading", "Title")
@@ -59,14 +60,17 @@ def _docx_body_baseline_pt(doc) -> float:
     return DOCX_DEFAULT_BODY_SIZE_PT
 
 
-def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True):
+def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True, table_id_counter=None):
+    if table_id_counter is None:
+        table_id_counter = itertools.count()
     for item in content_iter:
         if isinstance(item, DocxParagraph):
-            yield item, allow_text_pattern_heading, False
+            yield item, allow_text_pattern_heading, False, None
         elif isinstance(item, DocxTable):
+            table_id = next(table_id_counter)
             seen_cells = set()
-            for row in item.rows:
-                for cell in row.cells:
+            for row_index, row in enumerate(item.rows):
+                for col_index, cell in enumerate(row.cells):
                     # python-docx's row.cells returns one proxy per grid column, so a
                     # horizontally merged cell is returned once per spanned column, and a
                     # vertically merged cell reappears in every spanned row - all of these
@@ -91,12 +95,27 @@ def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True):
                     # from_table is always True here regardless of what was passed in -
                     # once inside a table, it stays True even for a table nested inside
                     # a header/footer, or a table nested inside another table's cell.
-                    for para, _, _ in _iter_docx_paragraphs(cell.iter_inner_content(), allow_text_pattern_heading=False):
-                        yield para, False, True
+                    #
+                    # The row/col index here is captured at each cell's first (non-duplicate)
+                    # occurrence, which is always the top-left anchor for a merged cell -
+                    # verified empirically against real horizontal and vertical merges before
+                    # writing this. This is the same fact the dedup above already relies on,
+                    # just also read as the cell's grid coordinate.
+                    position = TableCoordinate(table_id=table_id, row=row_index, col=col_index)
+                    for para, _, _, inner_position in _iter_docx_paragraphs(
+                        cell.iter_inner_content(),
+                        allow_text_pattern_heading=False,
+                        table_id_counter=table_id_counter,
+                    ):
+                        # A paragraph from a table nested even deeper than this cell already
+                        # carries its own (innermost) table's coordinate - preserve that
+                        # instead of overwriting it with this cell's position.
+                        yield para, False, True, inner_position if inner_position is not None else position
 
 
 def _docx_paragraph_to_model(
-    para, index: int, baseline_pt: float, allow_text_pattern_heading: bool = True, from_table: bool = False
+    para, index: int, baseline_pt: float, allow_text_pattern_heading: bool = True, from_table: bool = False,
+    table_position: TableCoordinate | None = None,
 ) -> Paragraph | None:
     text = para.text.strip()
     if not text:
@@ -117,6 +136,7 @@ def _docx_paragraph_to_model(
         is_heading=is_heading_style or is_heading_size,
         allow_text_pattern_heading=allow_text_pattern_heading,
         from_table=from_table,
+        table_position=table_position,
     )
 
 
@@ -170,11 +190,16 @@ def _extract_pdf(file_path: str) -> list[Paragraph]:
 def _extract_docx(file_path: str) -> list[Paragraph]:
     doc = DocxDocument(file_path)
     baseline_pt = _docx_body_baseline_pt(doc)
+    table_id_counter = itertools.count()
 
     paragraphs: list[Paragraph] = []
     index = 0
-    for para, allow_text_pattern_heading, from_table in _iter_docx_paragraphs(doc.iter_inner_content()):
-        model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
+    for para, allow_text_pattern_heading, from_table, table_position in _iter_docx_paragraphs(
+        doc.iter_inner_content(), table_id_counter=table_id_counter
+    ):
+        model = _docx_paragraph_to_model(
+            para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
+        )
         if model is not None:
             paragraphs.append(model)
             index += 1
@@ -184,24 +209,38 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     for section in doc.sections:
         if not section.header.is_linked_to_previous:
             header_paragraphs.extend(
-                _iter_docx_paragraphs(section.header.iter_inner_content(), allow_text_pattern_heading=False)
+                _iter_docx_paragraphs(
+                    section.header.iter_inner_content(),
+                    allow_text_pattern_heading=False,
+                    table_id_counter=table_id_counter,
+                )
             )
         if not section.footer.is_linked_to_previous:
             footer_paragraphs.extend(
-                _iter_docx_paragraphs(section.footer.iter_inner_content(), allow_text_pattern_heading=False)
+                _iter_docx_paragraphs(
+                    section.footer.iter_inner_content(),
+                    allow_text_pattern_heading=False,
+                    table_id_counter=table_id_counter,
+                )
             )
 
     # Filter out paragraphs with no real text (whitespace-only, or image/drawing-only
     # content where python-docx's Paragraph.text is empty) before checking emptiness,
     # so a header/footer with no actual content doesn't emit a bare pseudo-section.
-    header_paragraphs = [(p, atph, ft) for p, atph, ft in header_paragraphs if p.text.strip()]
-    footer_paragraphs = [(p, atph, ft) for p, atph, ft in footer_paragraphs if p.text.strip()]
+    header_paragraphs = [
+        (p, atph, ft, tp) for p, atph, ft, tp in header_paragraphs if p.text.strip()
+    ]
+    footer_paragraphs = [
+        (p, atph, ft, tp) for p, atph, ft, tp in footer_paragraphs if p.text.strip()
+    ]
 
     if header_paragraphs:
         paragraphs.append(Paragraph(text="Page Header", paragraph_index=index, is_heading=True))
         index += 1
-        for para, allow_text_pattern_heading, from_table in header_paragraphs:
-            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
+        for para, allow_text_pattern_heading, from_table, table_position in header_paragraphs:
+            model = _docx_paragraph_to_model(
+                para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
+            )
             if model is not None:
                 paragraphs.append(model)
                 index += 1
@@ -209,8 +248,10 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     if footer_paragraphs:
         paragraphs.append(Paragraph(text="Page Footer", paragraph_index=index, is_heading=True))
         index += 1
-        for para, allow_text_pattern_heading, from_table in footer_paragraphs:
-            model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading, from_table)
+        for para, allow_text_pattern_heading, from_table, table_position in footer_paragraphs:
+            model = _docx_paragraph_to_model(
+                para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
+            )
             if model is not None:
                 paragraphs.append(model)
                 index += 1

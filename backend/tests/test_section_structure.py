@@ -1,7 +1,7 @@
 from app.models import Section, Paragraph, SectionMatch
 from app.section_structure import (
     detect_section_renumbering, detect_section_reordering,
-    detect_section_added, detect_section_deleted,
+    detect_section_added, detect_section_deleted, detect_section_heading_changed,
 )
 
 
@@ -42,12 +42,16 @@ def test_reworded_heading_with_same_number_is_not_flagged():
     assert detect_section_renumbering(matches, old_sections, new_sections) == []
 
 
-def test_number_and_wording_both_changing_is_not_flagged_as_pure_renumbering():
+def test_number_and_wording_both_changing_flags_renumbering_too():
     old_sections = [Section(heading="2.0 Acceptance Criteria", paragraphs=[])]
     new_sections = [Section(heading="3.0 Acceptance Criteria for Assay", paragraphs=[])]
     matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
 
-    assert detect_section_renumbering(matches, old_sections, new_sections) == []
+    changes = detect_section_renumbering(matches, old_sections, new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "section_renumbered"
+    assert changes[0].reason == "Section renumbered from '2.0' to '3.0'."
 
 
 def test_headings_without_a_leading_number_are_not_flagged():
@@ -347,3 +351,72 @@ def test_excluded_paragraph_ids_are_omitted_from_deleted_section_text():
 
     assert len(changes) == 1
     assert changes[0].old_text == "8.0 Old Section\nThis paragraph is genuinely removed."
+
+
+def test_pure_rewording_is_detected():
+    old_sections = [Section(heading="8.0 Deviation Handling", paragraphs=[])]
+    new_sections = [Section(heading="8.0 Non-Conformance Management", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.change_type == "section_heading_changed"
+    assert c.section == "8.0 Deviation Handling"
+    assert c.old_text == "8.0 Deviation Handling"
+    assert c.new_text == "8.0 Non-Conformance Management"
+    assert c.reason == "Section heading changed from '8.0 Deviation Handling' to '8.0 Non-Conformance Management'."
+    assert c.ai_risk_level == "Medium"
+    assert c.source == "Body"
+    assert c.confidence == 1.0
+    assert c.old_page is None
+    assert c.new_page is None
+
+
+def test_pure_renumber_does_not_flag_heading_changed():
+    old_sections = [Section(heading="2.0 Acceptance Criteria", paragraphs=[])]
+    new_sections = [Section(heading="3.0 Acceptance Criteria", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_number_and_wording_both_changing_flags_heading_changed_too():
+    old_sections = [Section(heading="2.0 Acceptance Criteria", paragraphs=[])]
+    new_sections = [Section(heading="3.0 Acceptance Criteria for Assay", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].old_text == "2.0 Acceptance Criteria"
+    assert changes[0].new_text == "3.0 Acceptance Criteria for Assay"
+
+
+def test_reworded_heading_with_no_leading_number_is_detected():
+    old_sections = [Section(heading="SCOPE", paragraphs=[])]
+    new_sections = [Section(heading="PURPOSE", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].old_text == "SCOPE"
+    assert changes[0].new_text == "PURPOSE"
+
+
+def test_identical_headings_are_not_flagged():
+    old_sections = [Section(heading="1.0 Scope", paragraphs=[])]
+    new_sections = [Section(heading="1.0 Scope", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_synthetic_heading_is_not_flagged_as_heading_changed():
+    old_sections = [Section(heading="Paragraph 1", paragraphs=[])]
+    new_sections = [Section(heading="Paragraph 2", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []

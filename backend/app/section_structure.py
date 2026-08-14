@@ -29,7 +29,7 @@ def detect_section_renumbering(
             continue
         old_num, old_rest = old_split
         new_num, new_rest = new_split
-        if old_num == new_num or old_rest != new_rest:
+        if old_num == new_num:
             continue
         change_type = "section_renumbered"
         changes.append(Change(
@@ -151,5 +151,36 @@ def detect_section_deleted(
             old_text=old_text, new_text="", old_page=old_page, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=f"Section deleted: '{section.heading}'.", source=source,
+        ))
+    return changes
+
+
+def detect_section_heading_changed(
+    matches: list[SectionMatch],
+    old_sections: list[Section],
+    new_sections: list[Section],
+) -> list[Change]:
+    changes: list[Change] = []
+    for m in matches:
+        old_heading = old_sections[m.old_index].heading
+        new_heading = new_sections[m.new_index].heading
+        if old_heading == new_heading:
+            continue
+        if is_synthetic_heading(old_heading) or is_synthetic_heading(new_heading):
+            continue
+        old_split = _split_heading_number(old_heading)
+        new_split = _split_heading_number(new_heading)
+        if old_split is not None and new_split is not None:
+            _, old_rest = old_split
+            _, new_rest = new_split
+            if old_rest == new_rest:
+                continue
+        change_type = "section_heading_changed"
+        changes.append(Change(
+            change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
+            old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
+            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=f"Section heading changed from '{old_heading}' to '{new_heading}'.",
+            source="Body",
         ))
     return changes

@@ -38,3 +38,7 @@ def test_section_added_is_high_risk():
 
 def test_section_deleted_is_high_risk():
     assert assign_risk("section_deleted") == "High"
+
+
+def test_section_heading_changed_is_medium_risk():
+    assert assign_risk("section_heading_changed") == "Medium"

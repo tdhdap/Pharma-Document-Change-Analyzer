@@ -12,6 +12,7 @@ RISK_TABLE = {
     "section_reordered": "Informational",
     "section_added": "High",
     "section_deleted": "High",
+    "section_heading_changed": "Medium",
 }
 
 DEFAULT_RISK = "Medium"

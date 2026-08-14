@@ -5,7 +5,7 @@ from docx import Document as DocxDocument
 
 from app import pipeline, llm_classifier
 from app.extraction import extract_text
-from app.models import Paragraph, LLMClassification
+from app.models import Paragraph, LLMClassification, TableCoordinate
 
 
 def test_pipeline_reproduces_the_outline_example(monkeypatch):
@@ -392,6 +392,57 @@ def test_pipeline_reports_only_heading_changed_when_number_is_unchanged():
     assert change.change_type == "section_heading_changed"
     assert change.old_text == "1.0 Scope"
     assert change.new_text == "1.0 Purpose"
+
+
+def test_table_cell_edit_preserves_table_position_on_both_sides():
+    position = TableCoordinate(table_id=0, row=1, col=1)
+    old_paragraphs = [Paragraph(text="Weigh 10 mg of sample.", from_table=True, table_position=position)]
+    new_paragraphs = [Paragraph(text="Weigh 20 mg of sample.", from_table=True, table_position=position)]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.old_table_position == position
+    assert change.new_table_position == position
+
+
+def test_table_row_addition_only_sets_new_table_position():
+    position = TableCoordinate(table_id=0, row=3, col=0)
+    old_paragraphs = []
+    new_paragraphs = [Paragraph(text="New Row Value", from_table=True, table_position=position)]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.old_table_position is None
+    assert change.new_table_position == position
+
+
+def test_table_row_deletion_only_sets_old_table_position():
+    position = TableCoordinate(table_id=0, row=3, col=0)
+    old_paragraphs = [Paragraph(text="Old Row Value", from_table=True, table_position=position)]
+    new_paragraphs = []
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.old_table_position == position
+    assert change.new_table_position is None
+
+
+def test_body_paragraph_addition_has_no_table_position():
+    old_paragraphs = []
+    new_paragraphs = [Paragraph(text="New body sentence.")]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.old_table_position is None
+    assert change.new_table_position is None
 
 
 def test_pipeline_adding_a_section_break_does_not_falsely_flag_header_footer_as_changed():

@@ -19,6 +19,7 @@ def _build_paragraph_changes(
             old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
             confidence=detection.confidence, ai_risk_level=risk_rules.assign_risk(detection.change_type),
             reason=detection.reason, source=source,
+            old_table_position=old_p.table_position, new_table_position=new_p.table_position,
         ))
 
     already_detected_by_id: dict[str, list[str]] = {}
@@ -29,6 +30,7 @@ def _build_paragraph_changes(
             change_id=pending_id, section=section_heading, change_type="pending_llm_classification",
             old_text=old_p.text, new_text=new_p.text, old_page=old_p.page, new_page=new_p.page,
             confidence=0.0, ai_risk_level="Medium", reason="", source=source,
+            old_table_position=old_p.table_position, new_table_position=new_p.table_position,
         ))
         already_detected_by_id[pending_id] = [d.change_type for d in detections]
 
@@ -122,6 +124,7 @@ def compare_documents(
             old_page=mv.old_paragraph.page, new_page=mv.new_paragraph.page, confidence=mv.score,
             ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source=source,
+            old_table_position=mv.old_paragraph.table_position, new_table_position=mv.new_paragraph.table_position,
         ))
 
     for p, section in remaining_deletes:
@@ -139,6 +142,7 @@ def compare_documents(
             old_text=p.text, new_text="", old_page=p.page, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source=source,
+            old_table_position=p.table_position, new_table_position=None,
         ))
 
     for p, section in remaining_inserts:
@@ -156,6 +160,7 @@ def compare_documents(
             old_text="", new_text=p.text, old_page=None, new_page=p.page,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source=source,
+            old_table_position=None, new_table_position=p.table_position,
         ))
 
     pending = [c for c in changes if c.change_type == "pending_llm_classification"]

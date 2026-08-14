@@ -428,3 +428,40 @@ def test_internal_whitespace_only_difference_is_not_flagged_on_unnumbered_headin
     matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
 
     assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_page_header_becoming_qualified_is_not_flagged_as_heading_changed():
+    old_sections = [Section(heading="Page Header", paragraphs=[Paragraph(text="Confidential")])]
+    new_sections = [Section(heading="Page Header (Section 1)", paragraphs=[Paragraph(text="Confidential")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_page_footer_variant_qualification_is_not_flagged_as_heading_changed():
+    old_sections = [Section(heading="Page Footer", paragraphs=[])]
+    new_sections = [Section(heading="Page Footer (Section 2, First Page)", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_page_header_added_is_still_flagged_as_section_added():
+    # Regression guard proving the narrower fix does NOT suppress section_added for
+    # header/footer pseudo-sections - only detect_section_heading_changed is guarded.
+    new_sections = [Section(heading="Page Header", paragraphs=[Paragraph(text="Confidential")])]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "section_added"
+
+
+def test_page_footer_deleted_is_still_flagged_as_section_deleted():
+    # Mirror regression guard for detect_section_deleted.
+    old_sections = [Section(heading="Page Footer", paragraphs=[Paragraph(text="Page 1")])]
+
+    changes = detect_section_deleted([0], old_sections)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "section_deleted"

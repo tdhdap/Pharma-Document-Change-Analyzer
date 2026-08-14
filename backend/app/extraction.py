@@ -140,7 +140,7 @@ def _docx_paragraph_to_model(
     )
 
 
-def _docx_header_footer_specs(doc):
+def _docx_header_footer_specs(doc) -> list[tuple[str, int, str, object]]:
     odd_even_active = doc.settings.odd_and_even_pages_header_footer
     header_specs = []
     footer_specs = []
@@ -160,7 +160,7 @@ def _docx_header_footer_specs(doc):
     return header_specs + footer_specs
 
 
-def _header_footer_heading_text(kind, section_index, variant_label, multi_section):
+def _header_footer_heading_text(kind: str, section_index: int, variant_label: str, multi_section: bool) -> str:
     base = "Page Header" if kind == "header" else "Page Footer"
     parts = []
     if multi_section:

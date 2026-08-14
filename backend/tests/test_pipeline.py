@@ -1,4 +1,10 @@
+import os
+import tempfile
+
+from docx import Document as DocxDocument
+
 from app import pipeline, llm_classifier
+from app.extraction import extract_text
 from app.models import Paragraph, LLMClassification
 
 
@@ -386,3 +392,36 @@ def test_pipeline_reports_only_heading_changed_when_number_is_unchanged():
     assert change.change_type == "section_heading_changed"
     assert change.old_text == "1.0 Scope"
     assert change.new_text == "1.0 Purpose"
+
+
+def test_pipeline_adding_a_section_break_does_not_falsely_flag_header_footer_as_changed():
+    # Regression test for the exact scenario the final whole-branch review found broken:
+    # a document revised to add a section break, with header/footer content that doesn't
+    # actually change for a reader (second section stays linked/inherited). Before the
+    # fix, this spuriously produced section_heading_changed findings like
+    # "Page Header" -> "Page Header (Section 1)".
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        old_path = os.path.join(tmp_dir, "old.docx")
+        new_path = os.path.join(tmp_dir, "new.docx")
+
+        old_doc = DocxDocument()
+        old_doc.add_paragraph("Body content here.")
+        old_doc.sections[0].header.paragraphs[0].text = "Confidential - SOP-1234"
+        old_doc.sections[0].footer.paragraphs[0].text = "Uncontrolled Copy - Page 1"
+        old_doc.save(old_path)
+
+        new_doc = DocxDocument()
+        new_doc.add_paragraph("Body content here.")
+        new_doc.sections[0].header.paragraphs[0].text = "Confidential - SOP-1234"
+        new_doc.sections[0].footer.paragraphs[0].text = "Uncontrolled Copy - Page 1"
+        new_doc.add_section()
+        new_doc.add_paragraph("More content after a section break.")
+        new_doc.save(new_path)
+
+        old_extracted = extract_text(old_path, "docx")
+        new_extracted = extract_text(new_path, "docx")
+
+    result = pipeline.compare_documents(old_extracted, new_extracted, "old.docx", "new.docx")
+
+    heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
+    assert heading_changed == []

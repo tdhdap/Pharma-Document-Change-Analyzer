@@ -71,6 +71,13 @@ def is_synthetic_heading(heading: str) -> bool:
     return heading == "Preamble" or bool(_SYNTHETIC_HEADING_PATTERN.match(heading))
 
 
+_PAGE_HEADER_FOOTER_PATTERN = re.compile(r"^Page (Header|Footer)(\s\(.+\))?$")
+
+
+def _is_page_header_or_footer_heading(heading: str) -> bool:
+    return bool(_PAGE_HEADER_FOOTER_PATTERN.match(heading))
+
+
 def detect_section_reordering(
     matches: list[SectionMatch],
     old_sections: list[Section],
@@ -169,6 +176,8 @@ def detect_section_heading_changed(
         if old_norm == new_norm:
             continue
         if is_synthetic_heading(old_heading) or is_synthetic_heading(new_heading):
+            continue
+        if _is_page_header_or_footer_heading(old_heading) or _is_page_header_or_footer_heading(new_heading):
             continue
         old_split = _split_heading_number(old_heading)
         new_split = _split_heading_number(new_heading)

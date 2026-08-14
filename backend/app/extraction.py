@@ -236,51 +236,23 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             paragraphs.append(model)
             index += 1
 
-    header_paragraphs = []
-    footer_paragraphs = []
-    for section in doc.sections:
-        if not section.header.is_linked_to_previous:
-            header_paragraphs.extend(
-                _iter_docx_paragraphs(
-                    section.header.iter_inner_content(),
-                    allow_text_pattern_heading=False,
-                    table_id_counter=table_id_counter,
-                )
-            )
-        if not section.footer.is_linked_to_previous:
-            footer_paragraphs.extend(
-                _iter_docx_paragraphs(
-                    section.footer.iter_inner_content(),
-                    allow_text_pattern_heading=False,
-                    table_id_counter=table_id_counter,
-                )
-            )
-
-    # Filter out paragraphs with no real text (whitespace-only, or image/drawing-only
-    # content where python-docx's Paragraph.text is empty) before checking emptiness,
-    # so a header/footer with no actual content doesn't emit a bare pseudo-section.
-    header_paragraphs = [
-        (p, atph, ft, tp) for p, atph, ft, tp in header_paragraphs if p.text.strip()
-    ]
-    footer_paragraphs = [
-        (p, atph, ft, tp) for p, atph, ft, tp in footer_paragraphs if p.text.strip()
-    ]
-
-    if header_paragraphs:
-        paragraphs.append(Paragraph(text="Page Header", paragraph_index=index, is_heading=True))
+    multi_section = len(doc.sections) > 1
+    for kind, section_index, variant_label, source in _docx_header_footer_specs(doc):
+        raw = list(_iter_docx_paragraphs(
+            source.iter_inner_content(),
+            allow_text_pattern_heading=False,
+            table_id_counter=table_id_counter,
+        ))
+        # Filter out paragraphs with no real text (whitespace-only, or image/drawing-only
+        # content where python-docx's Paragraph.text is empty) before checking emptiness,
+        # so a header/footer with no actual content doesn't emit a bare pseudo-section.
+        raw = [(p, atph, ft, tp) for p, atph, ft, tp in raw if p.text.strip()]
+        if not raw:
+            continue
+        heading_text = _header_footer_heading_text(kind, section_index, variant_label, multi_section)
+        paragraphs.append(Paragraph(text=heading_text, paragraph_index=index, is_heading=True))
         index += 1
-        for para, allow_text_pattern_heading, from_table, table_position in header_paragraphs:
-            model = _docx_paragraph_to_model(
-                para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
-            )
-            if model is not None:
-                paragraphs.append(model)
-                index += 1
-
-    if footer_paragraphs:
-        paragraphs.append(Paragraph(text="Page Footer", paragraph_index=index, is_heading=True))
-        index += 1
-        for para, allow_text_pattern_heading, from_table, table_position in footer_paragraphs:
+        for para, allow_text_pattern_heading, from_table, table_position in raw:
             model = _docx_paragraph_to_model(
                 para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
             )

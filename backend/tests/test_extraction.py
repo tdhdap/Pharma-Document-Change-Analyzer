@@ -486,7 +486,7 @@ def test_extract_docx_table_inside_header_is_extracted(tmp_path):
     assert "Header cell B" in texts
 
 
-def test_extract_docx_multiple_sections_with_distinct_headers_combine(tmp_path):
+def test_extract_docx_multiple_sections_get_distinct_header_headings(tmp_path):
     file_path = tmp_path / "doc.docx"
     doc = DocxDocument()
     doc.add_paragraph("First section body.")
@@ -504,8 +504,14 @@ def test_extract_docx_multiple_sections_with_distinct_headers_combine(tmp_path):
     paragraphs = extract_text(str(file_path), "docx")
     texts = [p.text for p in paragraphs]
 
-    assert "First Header" in texts
-    assert "Second Header" in texts
+    assert "Page Header (Section 1)" in texts
+    assert "Page Header (Section 2)" in texts
+    assert "Page Header" not in texts  # unqualified name must not appear once there are 2 sections
+
+    section1_index = texts.index("Page Header (Section 1)")
+    section2_index = texts.index("Page Header (Section 2)")
+    assert texts[section1_index + 1] == "First Header"
+    assert texts[section2_index + 1] == "Second Header"
 
 
 def test_extract_docx_table_only_document_with_no_body_paragraphs(tmp_path):
@@ -925,3 +931,124 @@ def test_heading_text_even_page_single_section():
 def test_heading_text_even_page_multi_section():
     result = _header_footer_heading_text("header", 1, "Even Page", multi_section=True)
     assert result == "Page Header (Section 2, Even Page)"
+
+
+def test_extract_docx_first_page_header_extracted_when_toggle_is_on(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].different_first_page_header_footer = True
+    doc.sections[0].first_page_header.paragraphs[0].text = "First page header text"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header (First Page)" in texts
+    assert "First page header text" in texts
+
+
+def test_extract_docx_first_page_header_omitted_when_toggle_is_off(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].first_page_header.paragraphs[0].text = "First page header text"
+    # different_first_page_header_footer deliberately left False (default) -
+    # Word would never actually display this content.
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "First page header text" not in texts
+    assert not any("First Page" in t for t in texts)
+
+
+def test_extract_docx_even_page_header_extracted_when_document_toggle_is_on(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.settings.odd_and_even_pages_header_footer = True
+    doc.sections[0].even_page_header.paragraphs[0].text = "Even page header text"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header (Even Page)" in texts
+    assert "Even page header text" in texts
+
+
+def test_extract_docx_even_page_header_omitted_when_document_toggle_is_off(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].even_page_header.paragraphs[0].text = "Even page header text"
+    # doc.settings.odd_and_even_pages_header_footer deliberately left False (default).
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Even page header text" not in texts
+    assert not any("Even Page" in t for t in texts)
+
+
+def test_extract_docx_first_page_header_in_multi_section_document_is_fully_qualified(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("First section body.")
+    doc.add_section()
+    doc.sections[1].different_first_page_header_footer = True
+    # As with a regular header (see the distinct-headers test above), a newly added
+    # section's first_page_header defaults to is_linked_to_previous=True. Because section
+    # 1 never enabled different_first_page_header_footer, python-docx's inheritance walk
+    # would otherwise resolve the write all the way back to section 1's (unused) first-page
+    # definition instead of creating one for section 2. Explicitly unlink first.
+    doc.sections[1].first_page_header.is_linked_to_previous = False
+    doc.sections[1].first_page_header.paragraphs[0].text = "Section 2 first page header"
+    doc.add_paragraph("Second section body.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header (Section 2, First Page)" in texts
+    assert "Section 2 first page header" in texts
+
+
+def test_extract_docx_first_page_header_inherited_when_linked_even_with_toggle_on(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("First section body.")
+    doc.sections[0].different_first_page_header_footer = True
+    doc.sections[0].first_page_header.paragraphs[0].text = "Section 1 first page header"
+    doc.add_section()
+    doc.sections[1].different_first_page_header_footer = True
+    # Section 2's first_page_header is left linked to previous (default) - it should
+    # inherit section 1's content rather than getting its own pseudo-section.
+    doc.add_paragraph("Second section body.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Page Header (Section 1, First Page)" in texts
+    assert "Page Header (Section 2, First Page)" not in texts
+
+
+def test_extract_docx_table_inside_first_page_header_gets_table_position(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].different_first_page_header_footer = True
+    first_page_header = doc.sections[0].first_page_header
+    table = first_page_header.add_table(rows=1, cols=1, width=Inches(6))
+    table.cell(0, 0).text = "First page header table cell"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    cell_para = next(p for p in paragraphs if p.text == "First page header table cell")
+
+    assert cell_para.from_table is True
+    assert cell_para.table_position is not None

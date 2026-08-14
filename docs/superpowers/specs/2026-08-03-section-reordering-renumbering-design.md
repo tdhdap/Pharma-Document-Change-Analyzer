@@ -30,7 +30,13 @@ Add two new, independent `Change.change_type` values, both risk
   prefix changes but the rest of the heading text is identical. Any other
   kind of heading wording change (with or without a number change) is **out
   of scope** for this feature and stays undetected, same as today — it can be
-  a separate future feature ("heading rewording detection").
+  a separate future feature ("heading rewording detection"). (Superseded:
+  see `docs/superpowers/specs/2026-08-14-section-heading-changed-design.md`
+  — that "future feature" has since shipped as `section_heading_changed`,
+  and `detect_section_renumbering`'s guard was deliberately relaxed to fire
+  even when the rest of the heading text also changes. This document
+  describes the contract as originally implemented; the note above no
+  longer reflects current behavior.)
 - **`section_reordered`** — fires when a matched section's position changed
   *relative to the other matched sections*, ignoring pure index shifts caused
   by insertions/deletions elsewhere. Inserting one new section must not
@@ -81,7 +87,13 @@ and `new_sections[m.new_index].heading`. If both match, `num` differs, and
 `Change`. Headings where either side doesn't match the pattern (no
 detectable leading number) are silently skipped — no false positive; this
 only fires for the same numbered-heading style `sectioning.py`'s structural
-detection already recognizes.
+detection already recognizes. (Superseded: see
+`docs/superpowers/specs/2026-08-14-section-heading-changed-design.md` — the
+"and `rest` is identical" requirement was deliberately dropped;
+`detect_section_renumbering` now fires whenever `num` differs, regardless of
+whether `rest` also changed, and the separate `section_heading_changed`
+detector covers wording changes. This document describes the algorithm as
+originally implemented, not the current one.)
 
 **Reordering algorithm:** take `matches` sorted by `old_index`, and look at
 the sequence of their `new_index` values. Compute the **longest increasing
@@ -161,8 +173,14 @@ path unmodified, exactly like every other `change_type` string already does.
   untouched sections despite their raw `new_index` shifting — regression
   guard for the LIS-based logic specifically (this is the core correctness
   property of the feature).
-- Two sections genuinely swapped → both flagged `section_reordered`, reason
-  cites real before/after positions.
+- A section that jumps ahead of several others (their relative order to each
+  other is preserved, only the jumping section's position changed) → exactly
+  that section flagged `section_reordered`, reason cites real before/after
+  positions. (Note: a plain two-section swap is a degenerate case where LIS
+  can restore order by excluding either one of the pair — the algorithm
+  flags whichever one its tie-break picks, not both. This is expected,
+  minimal-edit LIS behavior, not a bug; tests target the unambiguous
+  multi-section case instead of relying on swap tie-breaking.)
 - A section that is both renumbered and reordered in the same comparison →
   both `Change`s present, independently, proving the two checks don't
   interfere with each other.

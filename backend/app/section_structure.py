@@ -27,8 +27,8 @@ def detect_section_renumbering(
         new_split = _split_heading_number(new_heading)
         if old_split is None or new_split is None:
             continue
-        old_num, old_rest = old_split
-        new_num, new_rest = new_split
+        old_num, _ = old_split
+        new_num, _ = new_split
         if old_num == new_num:
             continue
         change_type = "section_renumbered"
@@ -164,7 +164,9 @@ def detect_section_heading_changed(
     for m in matches:
         old_heading = old_sections[m.old_index].heading
         new_heading = new_sections[m.new_index].heading
-        if old_heading == new_heading:
+        old_norm = " ".join(old_heading.split())
+        new_norm = " ".join(new_heading.split())
+        if old_norm == new_norm:
             continue
         if is_synthetic_heading(old_heading) or is_synthetic_heading(new_heading):
             continue

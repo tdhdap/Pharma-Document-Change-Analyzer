@@ -330,24 +330,30 @@ def test_pipeline_content_moved_into_a_new_section_is_reported_as_moved_not_dele
     assert section_added[0].new_text == "3.0 Storage and Shelf Life"
 
 
-def test_pipeline_reports_both_renumbering_and_heading_change_for_one_section():
+def test_pipeline_reports_both_renumbering_and_heading_change_for_one_section(monkeypatch):
     old_paragraphs = [
         Paragraph(text="1.0 Scope"),
         Paragraph(text="This procedure applies to testing performed in the QC lab."),
         Paragraph(text="8.0 Deviation Handling"),
-        Paragraph(text="Any deviation shall be documented and approved."),
+        Paragraph(text="Any deviation shall be documented within 24 hours and approved."),
     ]
     new_paragraphs = [
         Paragraph(text="1.0 Scope"),
         Paragraph(text="This procedure applies to testing performed in the QC lab."),
         Paragraph(text="9.0 Non-Conformance Management"),
-        Paragraph(text="Any deviation shall be documented and approved."),
+        Paragraph(text="Any deviation shall be documented within 48 hours and approved."),
     ]
+
+    def fail_if_called(unresolved):
+        raise AssertionError("classify_changes_batch should not be called - regex fully explains this line")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
 
     result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
 
     renumbered = [c for c in result.changes if c.change_type == "section_renumbered"]
     heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
+    numeric_changed = [c for c in result.changes if c.change_type == "numeric_change"]
 
     assert len(renumbered) == 1
     assert renumbered[0].section == "8.0 Deviation Handling"
@@ -358,6 +364,9 @@ def test_pipeline_reports_both_renumbering_and_heading_change_for_one_section():
     assert heading_changed[0].old_text == "8.0 Deviation Handling"
     assert heading_changed[0].new_text == "9.0 Non-Conformance Management"
     assert heading_changed[0].ai_risk_level == "Medium"
+
+    assert len(numeric_changed) == 1
+    assert numeric_changed[0].ai_risk_level == "High"
 
 
 def test_pipeline_reports_only_heading_changed_when_number_is_unchanged():

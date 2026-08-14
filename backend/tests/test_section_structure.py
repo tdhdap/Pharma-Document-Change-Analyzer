@@ -420,3 +420,11 @@ def test_synthetic_heading_is_not_flagged_as_heading_changed():
     matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
 
     assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_internal_whitespace_only_difference_is_not_flagged_on_unnumbered_heading():
+    old_sections = [Section(heading="SCOPE  OF WORK", paragraphs=[])]
+    new_sections = [Section(heading="SCOPE OF WORK", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []

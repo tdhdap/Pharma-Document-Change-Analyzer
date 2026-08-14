@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.models import Change, ComparisonResult, build_summary
+from app.models import Change, ComparisonResult, build_summary, TableCoordinate
 
 
 def create_document(conn, filename: str, file_type: str, storage_path: str) -> str:
@@ -26,21 +26,37 @@ def save_comparison(conn, comparison: ComparisonResult, old_document_id: str, ne
         (comparison.comparison_id, old_document_id, new_document_id, datetime.now(timezone.utc).isoformat()),
     )
     for c in comparison.changes:
+        old_table_id = c.old_table_position.table_id if c.old_table_position else None
+        old_table_row = c.old_table_position.row if c.old_table_position else None
+        old_table_col = c.old_table_position.col if c.old_table_position else None
+        new_table_id = c.new_table_position.table_id if c.new_table_position else None
+        new_table_row = c.new_table_position.row if c.new_table_position else None
+        new_table_col = c.new_table_position.col if c.new_table_position else None
         conn.execute(
             """INSERT INTO changes
                (id, comparison_id, section, change_type, old_text, new_text, old_page, new_page,
-                confidence, ai_risk_level, reviewer_risk_level, reason, reviewer_comment, accepted, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence, ai_risk_level, reviewer_risk_level, reason, reviewer_comment, accepted, source,
+                old_table_id, old_table_row, old_table_col, new_table_id, new_table_row, new_table_col)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.change_id, comparison.comparison_id, c.section, c.change_type, c.old_text, c.new_text,
                 c.old_page, c.new_page, c.confidence, c.ai_risk_level, c.reviewer_risk_level, c.reason,
                 c.reviewer_comment, int(c.accepted), c.source,
+                old_table_id, old_table_row, old_table_col, new_table_id, new_table_row, new_table_col,
             ),
         )
     conn.commit()
 
 
 def _row_to_change(row) -> Change:
+    old_table_position = (
+        TableCoordinate(table_id=row["old_table_id"], row=row["old_table_row"], col=row["old_table_col"])
+        if row["old_table_id"] is not None else None
+    )
+    new_table_position = (
+        TableCoordinate(table_id=row["new_table_id"], row=row["new_table_row"], col=row["new_table_col"])
+        if row["new_table_id"] is not None else None
+    )
     return Change(
         change_id=row["id"], section=row["section"], change_type=row["change_type"],
         old_text=row["old_text"], new_text=row["new_text"], old_page=row["old_page"],
@@ -48,6 +64,7 @@ def _row_to_change(row) -> Change:
         reason=row["reason"], reviewer_risk_level=row["reviewer_risk_level"],
         reviewer_comment=row["reviewer_comment"], accepted=bool(row["accepted"]),
         source=row["source"] if row["source"] is not None else "Body",
+        old_table_position=old_table_position, new_table_position=new_table_position,
     )
 
 

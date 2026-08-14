@@ -2,7 +2,7 @@ import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
 from docx.shared import Inches, Pt
 
-from app.extraction import extract_text
+from app.extraction import extract_text, _docx_header_footer_specs, _header_footer_heading_text
 from app.sectioning import split_into_sections
 
 
@@ -810,3 +810,118 @@ def test_extract_docx_nested_table_gets_its_own_table_id_and_coordinates(tmp_pat
     assert nested_position.col == 0
     assert outer_position.row == 0
     assert outer_position.col == 0
+
+
+def test_specs_include_default_header_and_footer_when_set():
+    doc = DocxDocument()
+    doc.sections[0].header.paragraphs[0].text = "Header text"
+    doc.sections[0].footer.paragraphs[0].text = "Footer text"
+
+    specs = _docx_header_footer_specs(doc)
+
+    assert len(specs) == 2
+    header_spec = next(s for s in specs if s[0] == "header")
+    footer_spec = next(s for s in specs if s[0] == "footer")
+    assert (header_spec[1], header_spec[2]) == (0, "")
+    assert header_spec[3].paragraphs[0].text == "Header text"
+    assert (footer_spec[1], footer_spec[2]) == (0, "")
+    assert footer_spec[3].paragraphs[0].text == "Footer text"
+
+
+def test_specs_omit_default_header_and_footer_when_unset():
+    doc = DocxDocument()
+
+    specs = _docx_header_footer_specs(doc)
+
+    assert specs == []
+
+
+def test_specs_omit_first_page_variant_when_toggle_is_off():
+    doc = DocxDocument()
+    doc.sections[0].first_page_header.paragraphs[0].text = "First page header text"
+    # different_first_page_header_footer deliberately left False (default) - Word
+    # would never actually display this content.
+
+    specs = _docx_header_footer_specs(doc)
+
+    assert not any(s[2] == "First Page" for s in specs)
+
+
+def test_specs_include_first_page_variant_when_toggle_is_on():
+    doc = DocxDocument()
+    doc.sections[0].different_first_page_header_footer = True
+    doc.sections[0].first_page_header.paragraphs[0].text = "First page header text"
+
+    specs = _docx_header_footer_specs(doc)
+
+    first_page_specs = [s for s in specs if s[2] == "First Page"]
+    assert len(first_page_specs) == 1
+    assert first_page_specs[0][0] == "header"
+    assert first_page_specs[0][1] == 0
+    assert first_page_specs[0][3].paragraphs[0].text == "First page header text"
+
+
+def test_specs_omit_even_page_variant_when_document_toggle_is_off():
+    doc = DocxDocument()
+    doc.sections[0].even_page_header.paragraphs[0].text = "Even page header text"
+    # doc.settings.odd_and_even_pages_header_footer deliberately left False (default).
+
+    specs = _docx_header_footer_specs(doc)
+
+    assert not any(s[2] == "Even Page" for s in specs)
+
+
+def test_specs_include_even_page_variant_when_document_toggle_is_on():
+    doc = DocxDocument()
+    doc.settings.odd_and_even_pages_header_footer = True
+    doc.sections[0].even_page_header.paragraphs[0].text = "Even page header text"
+
+    specs = _docx_header_footer_specs(doc)
+
+    even_page_specs = [s for s in specs if s[2] == "Even Page"]
+    assert len(even_page_specs) == 1
+    assert even_page_specs[0][0] == "header"
+    assert even_page_specs[0][3].paragraphs[0].text == "Even page header text"
+
+
+def test_specs_are_ordered_all_headers_then_all_footers_across_sections():
+    doc = DocxDocument()
+    doc.sections[0].header.paragraphs[0].text = "Section 1 header"
+    doc.sections[0].footer.paragraphs[0].text = "Section 1 footer"
+    doc.add_section()
+    doc.sections[1].header.is_linked_to_previous = False
+    doc.sections[1].header.paragraphs[0].text = "Section 2 header"
+    doc.sections[1].footer.is_linked_to_previous = False
+    doc.sections[1].footer.paragraphs[0].text = "Section 2 footer"
+
+    specs = _docx_header_footer_specs(doc)
+
+    kinds_and_sections = [(s[0], s[1]) for s in specs]
+    assert kinds_and_sections == [("header", 0), ("header", 1), ("footer", 0), ("footer", 1)]
+
+
+def test_heading_text_default_single_section():
+    assert _header_footer_heading_text("header", 0, "", multi_section=False) == "Page Header"
+    assert _header_footer_heading_text("footer", 0, "", multi_section=False) == "Page Footer"
+
+
+def test_heading_text_default_multi_section():
+    assert _header_footer_heading_text("header", 1, "", multi_section=True) == "Page Header (Section 2)"
+
+
+def test_heading_text_first_page_single_section():
+    assert _header_footer_heading_text("header", 0, "First Page", multi_section=False) == "Page Header (First Page)"
+
+
+def test_heading_text_first_page_multi_section():
+    result = _header_footer_heading_text("footer", 1, "First Page", multi_section=True)
+    assert result == "Page Footer (Section 2, First Page)"
+
+
+def test_heading_text_even_page_single_section():
+    assert _header_footer_heading_text("header", 0, "Even Page", multi_section=False) == "Page Header (Even Page)"
+
+
+def test_heading_text_even_page_multi_section():
+    result = _header_footer_heading_text("header", 1, "Even Page", multi_section=True)
+    assert result == "Page Header (Section 2, Even Page)"

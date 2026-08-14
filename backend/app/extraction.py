@@ -140,6 +140,38 @@ def _docx_paragraph_to_model(
     )
 
 
+def _docx_header_footer_specs(doc):
+    odd_even_active = doc.settings.odd_and_even_pages_header_footer
+    header_specs = []
+    footer_specs = []
+    for section_index, section in enumerate(doc.sections):
+        variants = [("header", "footer", "")]
+        if section.different_first_page_header_footer:
+            variants.append(("first_page_header", "first_page_footer", "First Page"))
+        if odd_even_active:
+            variants.append(("even_page_header", "even_page_footer", "Even Page"))
+        for header_attr, footer_attr, variant_label in variants:
+            header_source = getattr(section, header_attr)
+            if not header_source.is_linked_to_previous:
+                header_specs.append(("header", section_index, variant_label, header_source))
+            footer_source = getattr(section, footer_attr)
+            if not footer_source.is_linked_to_previous:
+                footer_specs.append(("footer", section_index, variant_label, footer_source))
+    return header_specs + footer_specs
+
+
+def _header_footer_heading_text(kind, section_index, variant_label, multi_section):
+    base = "Page Header" if kind == "header" else "Page Footer"
+    parts = []
+    if multi_section:
+        parts.append(f"Section {section_index + 1}")
+    if variant_label:
+        parts.append(variant_label)
+    if not parts:
+        return base
+    return f"{base} ({', '.join(parts)})"
+
+
 def extract_text(file_path: str, file_type: str) -> list[Paragraph]:
     if file_type == "pdf":
         return _extract_pdf(file_path)

@@ -328,3 +328,52 @@ def test_pipeline_content_moved_into_a_new_section_is_reported_as_moved_not_dele
     section_added = [c for c in result.changes if c.change_type == "section_added"]
     assert len(section_added) == 1
     assert section_added[0].new_text == "3.0 Storage and Shelf Life"
+
+
+def test_pipeline_reports_both_renumbering_and_heading_change_for_one_section():
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="8.0 Deviation Handling"),
+        Paragraph(text="Any deviation shall be documented and approved."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+        Paragraph(text="9.0 Non-Conformance Management"),
+        Paragraph(text="Any deviation shall be documented and approved."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    renumbered = [c for c in result.changes if c.change_type == "section_renumbered"]
+    heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
+
+    assert len(renumbered) == 1
+    assert renumbered[0].section == "8.0 Deviation Handling"
+    assert renumbered[0].reason == "Section renumbered from '8.0' to '9.0'."
+
+    assert len(heading_changed) == 1
+    assert heading_changed[0].section == "8.0 Deviation Handling"
+    assert heading_changed[0].old_text == "8.0 Deviation Handling"
+    assert heading_changed[0].new_text == "9.0 Non-Conformance Management"
+    assert heading_changed[0].ai_risk_level == "Medium"
+
+
+def test_pipeline_reports_only_heading_changed_when_number_is_unchanged():
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This procedure applies to testing performed in the QC lab."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "SOP_v1.txt", "SOP_v2.txt")
+
+    assert result.summary.total_changes == 1
+    change = result.changes[0]
+    assert change.change_type == "section_heading_changed"
+    assert change.old_text == "1.0 Scope"
+    assert change.new_text == "1.0 Purpose"

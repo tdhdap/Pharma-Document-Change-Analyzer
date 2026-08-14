@@ -3,6 +3,13 @@ from typing import Optional
 
 
 @dataclass
+class TableCoordinate:
+    table_id: int
+    row: int
+    col: int
+
+
+@dataclass
 class Paragraph:
     text: str
     page: Optional[int] = None
@@ -10,6 +17,7 @@ class Paragraph:
     is_heading: bool = False
     allow_text_pattern_heading: bool = True
     from_table: bool = False
+    table_position: Optional[TableCoordinate] = None
 
 
 @dataclass

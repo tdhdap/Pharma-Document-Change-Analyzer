@@ -2,7 +2,7 @@
 from app.models import (
     Paragraph, Section, SectionMatch, SectionMatchResult, MovedParagraph,
     RegexDetection, LLMClassification, Change, ComparisonSummary,
-    ComparisonResult, build_summary,
+    ComparisonResult, build_summary, TableCoordinate,
 )
 
 
@@ -44,3 +44,21 @@ def test_build_summary_counts_by_risk():
     assert summary.medium_risk == 1
     assert summary.low_risk == 0
     assert summary.informational == 1
+
+
+def test_paragraph_table_position_defaults_to_none():
+    p = Paragraph(text="hello")
+    assert p.table_position is None
+
+
+def test_table_coordinate_holds_id_row_and_column():
+    coord = TableCoordinate(table_id=2, row=1, col=3)
+    assert coord.table_id == 2
+    assert coord.row == 1
+    assert coord.col == 3
+
+
+def test_paragraph_can_carry_a_table_position():
+    coord = TableCoordinate(table_id=0, row=0, col=0)
+    p = Paragraph(text="cell text", from_table=True, table_position=coord)
+    assert p.table_position is coord

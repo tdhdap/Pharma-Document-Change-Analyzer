@@ -62,3 +62,26 @@ def test_paragraph_can_carry_a_table_position():
     coord = TableCoordinate(table_id=0, row=0, col=0)
     p = Paragraph(text="cell text", from_table=True, table_position=coord)
     assert p.table_position is coord
+
+
+def test_change_table_positions_default_to_none():
+    c = Change(
+        change_id="c1", section="1.0 Scope", change_type="numeric_change",
+        old_text="95%", new_text="98%", old_page=1, new_page=1,
+        confidence=1.0, ai_risk_level="High", reason="value changed",
+    )
+    assert c.old_table_position is None
+    assert c.new_table_position is None
+
+
+def test_change_can_carry_table_positions():
+    old_pos = TableCoordinate(table_id=0, row=1, col=1)
+    new_pos = TableCoordinate(table_id=0, row=1, col=1)
+    c = Change(
+        change_id="c1", section="2.0 Acceptance Criteria", change_type="numeric_change",
+        old_text="95%", new_text="98%", old_page=1, new_page=1,
+        confidence=1.0, ai_risk_level="High", reason="value changed",
+        old_table_position=old_pos, new_table_position=new_pos,
+    )
+    assert c.old_table_position is old_pos
+    assert c.new_table_position is new_pos

@@ -84,6 +84,8 @@ class Change:
     reviewer_comment: Optional[str] = None
     accepted: bool = False
     source: str = "Body"
+    old_table_position: Optional[TableCoordinate] = None
+    new_table_position: Optional[TableCoordinate] = None
 
 
 @dataclass

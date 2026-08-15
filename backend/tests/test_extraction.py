@@ -1747,3 +1747,71 @@ def test_extract_docx_reference_to_missing_footnote_id_is_skipped(tmp_path):
 
     texts = [par.text for par in paragraphs]
     assert texts == ["Claim with a dangling footnote reference."]
+
+
+def test_extract_docx_footnote_referenced_from_inside_text_box_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Ordinary body paragraph.")
+    body = doc.element.body
+    p = body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    drawing_xml = """<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <wp:inline><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+    <wps:wsp><wps:txbx>
+      <w:txbxContent><w:p><w:r><w:t xml:space="preserve">Callout text with a footnote.</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p></w:txbxContent>
+    </wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:inline>
+</w:drawing>"""
+    drawing = etree.fromstring(drawing_xml.encode())
+    r.append(drawing)
+    body.append(p)
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Footnote referenced from inside a text box."])])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert texts == [
+        "Ordinary body paragraph.",
+        "Text Box 1", "Callout text with a footnote.",
+        "Footnote 1", "Footnote referenced from inside a text box.",
+    ]
+
+
+def test_extract_docx_footnote_in_mc_alternate_content_text_box_is_extracted_once(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    body = doc.element.body
+    p = body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    mc_xml = """<mc:AlternateContent xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+  <mc:Choice Requires="wps">
+    <w:drawing><wp:inline><a:graphic><a:graphicData uri="x"><wps:wsp><wps:txbx>
+      <w:txbxContent><w:p><w:r><w:t xml:space="preserve">Box text.</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p></w:txbxContent>
+    </wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing>
+  </mc:Choice>
+  <mc:Fallback>
+    <w:pict><v:shape><v:textbox>
+      <w:txbxContent><w:p><w:r><w:t xml:space="preserve">Box text.</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p></w:txbxContent>
+    </v:textbox></v:shape></w:pict>
+  </mc:Fallback>
+</mc:AlternateContent>"""
+    mc = etree.fromstring(mc_xml.encode())
+    r.append(mc)
+    body.append(p)
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Should appear exactly once."])])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    footnote_headings = [par.text for par in paragraphs if par.text.startswith("Footnote ")]
+    assert footnote_headings == ["Footnote 1"]
+    assert [par.text for par in paragraphs].count("Should appear exactly once.") == 1

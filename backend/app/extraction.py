@@ -183,7 +183,7 @@ def _iter_text_box_paragraphs(root_element, doc):
     # copy so each real text box is extracted exactly once.
     #
     # A text box's own content can itself contain a table (e.g. a callout box
-    # with a small limits table) - _txbx_content_iter + _iter_docx_paragraphs
+    # with a small limits table) - _content_iter + _iter_docx_paragraphs
     # reuses the same table-walking logic the main body/header/footer walks
     # already use, so that content isn't silently dropped. Its from_table/
     # table_position outputs are discarded below - text-box content always
@@ -323,13 +323,26 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     paragraphs: list[Paragraph] = []
     index = 0
     footnote_refs_in_order: list[str] = []
+    seen_footnote_ids: set[str] = set()
     for para, allow_text_pattern_heading, from_table, table_position in _iter_docx_paragraphs(
         doc.iter_inner_content(), table_id_counter=table_id_counter
     ):
         # Collecting footnote reference ids here, in the same walk that already visits
         # every body paragraph, avoids a second full-body traversal just to find them.
+        # Word 2010+ wraps a user text box in mc:AlternateContent containing both a
+        # DrawingML and VML copy of identical content (the same duplication
+        # _has_mc_fallback_ancestor already guards against for text-box paragraph
+        # extraction) - a footnote reference inside such a box would otherwise be
+        # found twice. Deduping on id additionally guards the (separate, rarer) case
+        # of the same footnote genuinely being referenced more than once.
         for ref in para._p.findall(".//" + qn("w:footnoteReference")):
-            footnote_refs_in_order.append(ref.get(qn("w:id")))
+            if _has_mc_fallback_ancestor(ref):
+                continue
+            ref_id = ref.get(qn("w:id"))
+            if ref_id in seen_footnote_ids:
+                continue
+            seen_footnote_ids.add(ref_id)
+            footnote_refs_in_order.append(ref_id)
         model = _docx_paragraph_to_model(
             para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
         )

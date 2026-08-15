@@ -251,7 +251,8 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             index += 1
 
     multi_section = len(doc.sections) > 1
-    for kind, section_index, variant_label, source in _docx_header_footer_specs(doc):
+    header_footer_specs = _docx_header_footer_specs(doc)
+    for kind, section_index, variant_label, source in header_footer_specs:
         raw = list(_iter_docx_paragraphs(
             source.iter_inner_content(),
             allow_text_pattern_heading=False,
@@ -273,6 +274,22 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             if model is not None:
                 paragraphs.append(model)
                 index += 1
+
+    text_box_roots = [doc.element.body] + [source._element for _, _, _, source in header_footer_specs]
+    text_box_number = 0
+    for root_element in text_box_roots:
+        for group in _iter_text_box_paragraphs(root_element, doc):
+            group = [p for p in group if p.text.strip()]
+            if not group:
+                continue
+            text_box_number += 1
+            paragraphs.append(Paragraph(text=f"Text Box {text_box_number}", paragraph_index=index, is_heading=True))
+            index += 1
+            for para in group:
+                model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading=False)
+                if model is not None:
+                    paragraphs.append(model)
+                    index += 1
 
     return paragraphs
 

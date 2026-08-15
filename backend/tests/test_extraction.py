@@ -1196,3 +1196,109 @@ def test_iter_text_box_paragraphs_handles_nested_text_box_as_separate_group():
     assert len(groups) == 2
     assert [p.text for p in groups[0]] == ["Outer box own text."]
     assert [p.text for p in groups[1]] == ["Inner nested box text."]
+
+
+def test_extract_docx_text_box_in_body_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Normal body paragraph.")
+    _add_text_box(doc.element.body, ["Text box content here."])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Text Box 1" in texts
+    text_box_index = texts.index("Text Box 1")
+    assert paragraphs[text_box_index].is_heading is True
+    assert "Text box content here." in texts
+
+
+def test_extract_docx_text_box_content_has_correct_default_fields(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["Text box content here."])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    content_para = next(p for p in paragraphs if p.text == "Text box content here.")
+
+    assert content_para.from_table is False
+    assert content_para.table_position is None
+
+
+def test_extract_docx_multiple_text_boxes_get_sequential_numbers(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["First box."])
+    _add_text_box(doc.element.body, ["Second box."])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Text Box 1" in texts
+    assert "Text Box 2" in texts
+    assert texts.index("Text Box 1") < texts.index("First box.")
+    assert texts.index("Text Box 2") < texts.index("Second box.")
+
+
+def test_extract_docx_empty_text_box_produces_no_pseudo_section(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Normal body paragraph.")
+    _add_text_box(doc.element.body, [""])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Text Box 1" not in texts
+
+
+def test_extract_docx_text_box_inside_active_first_page_header_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    doc.sections[0].different_first_page_header_footer = True
+    first_page_header_element = doc.sections[0].first_page_header._element
+    _add_text_box(first_page_header_element, ["First page header text box."])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Text Box 1" in texts
+    assert "First page header text box." in texts
+
+
+def test_extract_docx_text_box_inside_inactive_variant_is_not_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body content here.")
+    # different_first_page_header_footer deliberately left False - Word would never
+    # display this content, and _docx_header_footer_specs correctly excludes this
+    # variant entirely regardless of the text box injected into it.
+    first_page_header_element = doc.sections[0].first_page_header._element
+    _add_text_box(first_page_header_element, ["Inactive first page header text box."])
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    texts = [p.text for p in paragraphs]
+
+    assert "Inactive first page header text box." not in texts
+    assert "Text Box 1" not in texts
+
+
+def test_extract_docx_without_text_boxes_is_unchanged(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("1.0 Scope", style="Heading 1")
+    doc.add_paragraph("This procedure applies to all testing.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert len(paragraphs) == 2
+    assert paragraphs[0].text == "1.0 Scope"
+    assert paragraphs[1].text == "This procedure applies to all testing."

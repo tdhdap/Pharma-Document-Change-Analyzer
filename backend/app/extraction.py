@@ -3,6 +3,7 @@ import itertools
 
 import fitz
 from docx import Document as DocxDocument
+from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
@@ -158,8 +159,8 @@ def _docx_paragraph_to_model(
     )
 
 
-def _txbx_content_iter(txbx_element, doc):
-    for child in txbx_element:
+def _content_iter(element, doc):
+    for child in element:
         if child.tag == qn("w:p"):
             yield DocxParagraph(child, doc)
         elif child.tag == qn("w:tbl"):
@@ -190,7 +191,49 @@ def _iter_text_box_paragraphs(root_element, doc):
     for txbx in root_element.findall(".//" + qn("w:txbxContent")):
         if _has_mc_fallback_ancestor(txbx):
             continue
-        yield [para for para, _, _, _ in _iter_docx_paragraphs(_txbx_content_iter(txbx, doc))]
+        yield [para for para, _, _, _ in _iter_docx_paragraphs(_content_iter(txbx, doc))]
+
+
+_FOOTNOTES_RELTYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+_EXCLUDED_FOOTNOTE_TYPES = {"separator", "continuationSeparator"}
+
+
+def _footnotes_root(doc):
+    # python-docx has no API for footnotes at all - the footnotes part loads as an
+    # opaque, unparsed Part (verified empirically: it has no registered subclass for
+    # the footnotes content type, so python-docx exposes only a raw .blob). The
+    # relationship type is the canonical, stable way to locate it regardless of that -
+    # verified empirically to be present and correctly typed even though the part
+    # itself is otherwise unrecognized, and cleanly absent (no error) on documents
+    # with no footnotes.
+    for rel in doc.part.rels.values():
+        if rel.reltype == _FOOTNOTES_RELTYPE:
+            return parse_xml(rel.target_part.blob)
+    return None
+
+
+def _footnote_content_by_id(footnotes_root, doc):
+    # Word writes two non-content footnotes used purely for print layout - a
+    # "separator" and a "continuationSeparator" - identified by w:type. Real,
+    # user-authored footnotes have no w:type attribute (or, per the OOXML spec's
+    # allowance, an explicit w:type="normal") - both are treated as real content.
+    # Keyed by w:id (a string, not necessarily contiguous or in document order) -
+    # verified empirically that Word does not guarantee footnote ids are assigned
+    # in reference order, so callers must join on this id, never on position.
+    #
+    # A footnote's content model allows both paragraphs and tables (the same content
+    # model already handled for text boxes) - reusing _content_iter + _iter_docx_paragraphs
+    # here means a table inside a footnote is captured correctly from the start,
+    # rather than needing a second fix later the way text boxes did.
+    content_by_id = {}
+    for footnote in footnotes_root.findall(qn("w:footnote")):
+        if footnote.get(qn("w:type")) in _EXCLUDED_FOOTNOTE_TYPES:
+            continue
+        footnote_id = footnote.get(qn("w:id"))
+        content_by_id[footnote_id] = [
+            para for para, _, _, _ in _iter_docx_paragraphs(_content_iter(footnote, doc))
+        ]
+    return content_by_id
 
 
 def _docx_header_footer_specs(doc) -> list[tuple[str, int, str, object]]:

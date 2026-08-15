@@ -2,10 +2,12 @@ import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
 from docx.shared import Inches, Pt
 from lxml import etree
+from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
 from app.extraction import extract_text, _docx_header_footer_specs, _header_footer_heading_text
 from app.extraction import _iter_text_box_paragraphs
+from app.extraction import _footnotes_root, _footnote_content_by_id
 from app.sectioning import split_into_sections
 
 
@@ -1405,3 +1407,87 @@ def test_iter_text_box_paragraphs_extracts_nested_table_content():
 
     assert len(groups) == 1
     assert [para.text for para in groups[0]] == ["Caption above table.", "Spec limit", "NMT 2.0%"]
+
+
+def test_footnotes_root_returns_none_when_document_has_no_footnotes():
+    doc = DocxDocument()
+    doc.add_paragraph("Plain paragraph, no footnotes.")
+
+    assert _footnotes_root(doc) is None
+
+
+def test_footnote_content_by_id_excludes_boilerplate_and_keys_by_id():
+    footnotes_xml = (
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>'
+        '<w:footnote w:type="continuationSeparator" w:id="0">'
+        '<w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>'
+        '<w:footnote w:id="1">' + _paragraph_xml("See ICH Q1A(R2) for stability testing requirements.") + '</w:footnote>'
+        '</w:footnotes>'
+    )
+    root = parse_xml(footnotes_xml.encode())
+    doc = DocxDocument()
+
+    content_by_id = _footnote_content_by_id(root, doc)
+
+    assert list(content_by_id.keys()) == ["1"]
+    assert [para.text for para in content_by_id["1"]] == ["See ICH Q1A(R2) for stability testing requirements."]
+
+
+def test_footnote_content_by_id_extracts_multi_paragraph_footnote():
+    footnotes_xml = (
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:id="1">'
+        + _paragraph_xml("First line of the footnote.")
+        + _paragraph_xml("Second line of the footnote.")
+        + '</w:footnote>'
+        '</w:footnotes>'
+    )
+    root = parse_xml(footnotes_xml.encode())
+    doc = DocxDocument()
+
+    content_by_id = _footnote_content_by_id(root, doc)
+
+    assert [para.text for para in content_by_id["1"]] == [
+        "First line of the footnote.", "Second line of the footnote.",
+    ]
+
+
+def test_footnote_content_by_id_extracts_nested_table_content():
+    footnotes_xml = (
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:id="1">'
+        '<w:p><w:r><w:t xml:space="preserve">Reference standards:</w:t></w:r></w:p>'
+        '<w:tbl>'
+        '<w:tblPr/><w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid>'
+        '<w:tr>'
+        '<w:tc><w:p><w:r><w:t xml:space="preserve">USP</w:t></w:r></w:p></w:tc>'
+        '<w:tc><w:p><w:r><w:t xml:space="preserve">Chapter 621</w:t></w:r></w:p></w:tc>'
+        '</w:tr>'
+        '</w:tbl>'
+        '</w:footnote>'
+        '</w:footnotes>'
+    )
+    root = parse_xml(footnotes_xml.encode())
+    doc = DocxDocument()
+
+    content_by_id = _footnote_content_by_id(root, doc)
+
+    assert [para.text for para in content_by_id["1"]] == ["Reference standards:", "USP", "Chapter 621"]
+
+
+def test_footnote_content_by_id_handles_multiple_non_contiguous_ids():
+    footnotes_xml = (
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:id="5">' + _paragraph_xml("First citation text.") + '</w:footnote>'
+        '<w:footnote w:id="7">' + _paragraph_xml("Second citation text.") + '</w:footnote>'
+        '</w:footnotes>'
+    )
+    root = parse_xml(footnotes_xml.encode())
+    doc = DocxDocument()
+
+    content_by_id = _footnote_content_by_id(root, doc)
+
+    assert set(content_by_id.keys()) == {"5", "7"}
+    assert [para.text for para in content_by_id["5"]] == ["First citation text."]
+    assert [para.text for para in content_by_id["7"]] == ["Second citation text."]

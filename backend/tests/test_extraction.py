@@ -1,9 +1,62 @@
 import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
 from docx.shared import Inches, Pt
+from lxml import etree
+from docx.oxml.ns import qn
 
 from app.extraction import extract_text, _docx_header_footer_specs, _header_footer_heading_text
+from app.extraction import _iter_text_box_paragraphs
 from app.sectioning import split_into_sections
+
+
+_DRAWINGML_TEXTBOX_XML = """<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <wp:inline>
+    <wp:extent cx="1828800" cy="1143000"/>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp>
+          <wps:txbx>
+            <w:txbxContent>{paragraphs}</w:txbxContent>
+          </wps:txbx>
+        </wps:wsp>
+      </a:graphicData>
+    </a:graphic>
+  </wp:inline>
+</w:drawing>"""
+
+_VML_TEXTBOX_XML = """<w:pict xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:v="urn:schemas-microsoft-com:vml"
+    xmlns:o="urn:schemas-microsoft-com:office:office">
+  <v:shape style="width:150pt;height:80pt">
+    <v:textbox>
+      <w:txbxContent>{paragraphs}</w:txbxContent>
+    </v:textbox>
+  </v:shape>
+</w:pict>"""
+
+
+def _paragraph_xml(*run_texts):
+    runs = "".join(f'<w:r><w:t xml:space="preserve">{t}</w:t></w:r>' for t in run_texts)
+    return f"<w:p>{runs}</w:p>"
+
+
+def _add_text_box(container_element, paragraph_texts, vml=False):
+    """Inject a real text box (DrawingML by default, VML if vml=True) containing the
+    given paragraphs into container_element (e.g. doc.element.body, a table cell's
+    _tc, or a header/footer's _element - any lxml element works generically).
+    python-docx has no API to add a text box, so this constructs the raw OOXML
+    directly - the exact technique verified empirically before writing this plan."""
+    p = container_element.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    paragraphs_xml = "".join(_paragraph_xml(text) for text in paragraph_texts)
+    template = _VML_TEXTBOX_XML if vml else _DRAWINGML_TEXTBOX_XML
+    drawing = etree.fromstring(template.format(paragraphs=paragraphs_xml).encode())
+    r.append(drawing)
+    container_element.append(p)
 
 
 def test_extract_txt_splits_on_blank_lines(tmp_path):
@@ -1052,3 +1105,94 @@ def test_extract_docx_table_inside_first_page_header_gets_table_position(tmp_pat
 
     assert cell_para.from_table is True
     assert cell_para.table_position is not None
+
+
+def test_iter_text_box_paragraphs_finds_drawingml_text_box():
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["Text box paragraph one.", "Text box paragraph two."])
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 1
+    assert [p.text for p in groups[0]] == ["Text box paragraph one.", "Text box paragraph two."]
+
+
+def test_iter_text_box_paragraphs_finds_vml_text_box():
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["Legacy VML text box paragraph."], vml=True)
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 1
+    assert [p.text for p in groups[0]] == ["Legacy VML text box paragraph."]
+
+
+def test_iter_text_box_paragraphs_joins_multiple_runs():
+    doc = DocxDocument()
+    p = doc.element.body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    paragraphs_xml = _paragraph_xml("Multi-", "run", " sentence.")
+    drawing = etree.fromstring(_DRAWINGML_TEXTBOX_XML.format(paragraphs=paragraphs_xml).encode())
+    r.append(drawing)
+    doc.element.body.append(p)
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 1
+    assert [p.text for p in groups[0]] == ["Multi-run sentence."]
+
+
+def test_iter_text_box_paragraphs_returns_nothing_when_none_present():
+    doc = DocxDocument()
+    doc.add_paragraph("Ordinary paragraph, no text box.")
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert groups == []
+
+
+def test_iter_text_box_paragraphs_finds_multiple_text_boxes_as_separate_groups():
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["First box text."])
+    _add_text_box(doc.element.body, ["Second box text."])
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 2
+    assert [p.text for p in groups[0]] == ["First box text."]
+    assert [p.text for p in groups[1]] == ["Second box text."]
+
+
+def test_iter_text_box_paragraphs_finds_text_box_inside_table_cell():
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=1)
+    cell_element = table.cell(0, 0)._tc
+    _add_text_box(cell_element, ["Table cell text box."])
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 1
+    assert [p.text for p in groups[0]] == ["Table cell text box."]
+
+
+def test_iter_text_box_paragraphs_handles_nested_text_box_as_separate_group():
+    doc = DocxDocument()
+    p = doc.element.body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    inner_paragraphs_xml = _paragraph_xml("Inner nested box text.")
+    inner_drawing_xml = _DRAWINGML_TEXTBOX_XML.format(paragraphs=inner_paragraphs_xml)
+    outer_paragraphs_xml = (
+        '<w:p><w:r><w:t xml:space="preserve">Outer box own text.</w:t></w:r>'
+        f'<w:r>{inner_drawing_xml}</w:r></w:p>'
+    )
+    outer_drawing = etree.fromstring(_DRAWINGML_TEXTBOX_XML.format(paragraphs=outer_paragraphs_xml).encode())
+    r.append(outer_drawing)
+    doc.element.body.append(p)
+
+    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+
+    assert len(groups) == 2
+    assert [p.text for p in groups[0]] == ["Outer box own text."]
+    assert [p.text for p in groups[1]] == ["Inner nested box text."]

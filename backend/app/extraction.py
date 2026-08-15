@@ -3,6 +3,7 @@ import itertools
 
 import fitz
 from docx import Document as DocxDocument
+from docx.oxml.ns import qn
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
 
@@ -138,6 +139,19 @@ def _docx_paragraph_to_model(
         from_table=from_table,
         table_position=table_position,
     )
+
+
+def _iter_text_box_paragraphs(root_element, doc):
+    # python-docx has no API for text boxes at all - a paragraph containing one
+    # reads as completely empty through every normal reading path (verified
+    # empirically before writing this plan). Both text box formats Word uses -
+    # modern DrawingML and legacy VML - wrap their actual content in a plain
+    # w:txbxContent element, so this single search finds both identically with
+    # no format-specific branching. The search is transitive (".//"), so it finds
+    # text boxes at any nesting depth - inside table cells, inside other text
+    # boxes, etc. - with no special recursion needed, unlike table extraction.
+    for txbx in root_element.findall(".//" + qn("w:txbxContent")):
+        yield [DocxParagraph(raw_p, doc) for raw_p in txbx.findall(qn("w:p"))]
 
 
 def _docx_header_footer_specs(doc) -> list[tuple[str, int, str, object]]:

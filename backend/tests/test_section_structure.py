@@ -484,3 +484,22 @@ def test_text_box_added_is_still_flagged_as_section_added():
 
     assert len(changes) == 1
     assert changes[0].change_type == "section_added"
+
+
+def test_footnote_renumbering_is_not_flagged_as_heading_changed():
+    old_sections = [Section(heading="Footnote 1", paragraphs=[Paragraph(text="See ICH Q1A(R2).")])]
+    new_sections = [Section(heading="Footnote 2", paragraphs=[Paragraph(text="See ICH Q1A(R2).")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_footnote_added_is_still_flagged_as_section_added():
+    # Regression guard proving the narrower fix does NOT suppress section_added
+    # for a genuinely new footnote (mirrors test_text_box_added_is_still_flagged_as_section_added).
+    new_sections = [Section(heading="Footnote 1", paragraphs=[Paragraph(text="New citation.")])]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "section_added"

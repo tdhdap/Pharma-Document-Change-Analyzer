@@ -1,3 +1,5 @@
+import zipfile
+
 import fitz  # PyMuPDF, used here only to build test fixtures
 from docx import Document as DocxDocument
 from docx.shared import Inches, Pt
@@ -59,6 +61,67 @@ def _add_text_box(container_element, paragraph_texts, vml=False):
     drawing = etree.fromstring(template.format(paragraphs=paragraphs_xml).encode())
     r.append(drawing)
     container_element.append(p)
+
+
+def _add_footnote_reference(paragraph, footnote_id):
+    """Inject a real <w:footnoteReference w:id="..."/> into the given python-docx
+    Paragraph's XML - python-docx has no API to add a footnote reference, so this
+    constructs the raw OOXML directly, the same technique already used for text boxes."""
+    p = paragraph._p
+    r = p.makeelement(qn("w:r"), {})
+    ref = r.makeelement(qn("w:footnoteReference"), {qn("w:id"): str(footnote_id)})
+    r.append(ref)
+    p.append(r)
+
+
+def _save_docx_with_footnotes(doc, path, footnotes):
+    """Save doc, then splice a real word/footnotes.xml part into the resulting .docx
+    package (content-type override + relationship + the part itself). python-docx has
+    no API to add this part, so this manipulates the OPC zip package directly - the
+    exact technique verified empirically before writing this plan. `footnotes` is a
+    list of (footnote_id, paragraph_texts) tuples for the real (non-boilerplate)
+    footnotes; the two Word-internal separator footnotes are always included. Callers
+    must have already used _add_footnote_reference for each corresponding id before
+    calling doc.save() - this only splices the footnotes.xml part and its relationship,
+    not the body's own <w:footnoteReference> elements."""
+    doc.save(path)
+    footnote_blocks = "".join(
+        f'<w:footnote w:id="{fid}">' + "".join(_paragraph_xml(t) for t in texts) + "</w:footnote>"
+        for fid, texts in footnotes
+    )
+    footnotes_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>'
+        '<w:footnote w:type="continuationSeparator" w:id="0">'
+        '<w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>'
+        f'{footnote_blocks}'
+        '</w:footnotes>'
+    )
+    with zipfile.ZipFile(path, "r") as zin:
+        names = zin.namelist()
+        content_types_xml = zin.read("[Content_Types].xml").decode("utf-8")
+        rels_xml = zin.read("word/_rels/document.xml.rels").decode("utf-8")
+        other = {n: zin.read(n) for n in names if n not in ("[Content_Types].xml", "word/_rels/document.xml.rels")}
+
+    content_types_xml = content_types_xml.replace(
+        "</Types>",
+        '<Override PartName="/word/footnotes.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>',
+    )
+    rels_xml = rels_xml.replace(
+        "</Relationships>",
+        '<Relationship Id="rIdFootnotes" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" '
+        'Target="footnotes.xml"/></Relationships>',
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr("[Content_Types].xml", content_types_xml)
+        zout.writestr("word/_rels/document.xml.rels", rels_xml)
+        zout.writestr("word/footnotes.xml", footnotes_xml)
+        for name, data in other.items():
+            zout.writestr(name, data)
 
 
 def test_extract_txt_splits_on_blank_lines(tmp_path):
@@ -1491,3 +1554,196 @@ def test_footnote_content_by_id_handles_multiple_non_contiguous_ids():
     assert set(content_by_id.keys()) == {"5", "7"}
     assert [para.text for para in content_by_id["5"]] == ["First citation text."]
     assert [para.text for para in content_by_id["7"]] == ["Second citation text."]
+
+
+def test_extract_docx_single_footnote_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph("This is a claim with a footnote reference.")
+    _add_footnote_reference(p, "1")
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["See ICH Q1A(R2) for stability testing requirements."])])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert texts == [
+        "This is a claim with a footnote reference.",
+        "Footnote 1",
+        "See ICH Q1A(R2) for stability testing requirements.",
+    ]
+    heading_flags = {par.text: par.is_heading for par in paragraphs}
+    assert heading_flags["Footnote 1"] is True
+    assert heading_flags["See ICH Q1A(R2) for stability testing requirements."] is False
+
+
+def test_extract_docx_multiple_footnotes_get_sequential_numbers_in_reference_order(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p1 = doc.add_paragraph("First claim.")
+    _add_footnote_reference(p1, "5")
+    p2 = doc.add_paragraph("Second claim.")
+    _add_footnote_reference(p2, "7")
+    _save_docx_with_footnotes(doc, str(file_path), [
+        ("5", ["First citation text."]),
+        ("7", ["Second citation text."]),
+    ])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert texts == [
+        "First claim.", "Second claim.",
+        "Footnote 1", "First citation text.",
+        "Footnote 2", "Second citation text.",
+    ]
+
+
+def test_extract_docx_footnote_content_has_correct_default_fields(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph("Claim.")
+    _add_footnote_reference(p, "1")
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Citation text."])])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    footnote_para = next(par for par in paragraphs if par.text == "Citation text.")
+    assert footnote_para.from_table is False
+    assert footnote_para.table_position is None
+    assert footnote_para.allow_text_pattern_heading is False
+
+
+def test_extract_docx_footnote_with_nested_table_is_extracted(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph("Claim needing a reference standard.")
+    _add_footnote_reference(p, "1")
+    doc.save(str(file_path))
+    footnotes_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:id="1">'
+        '<w:p><w:r><w:t xml:space="preserve">Reference standards:</w:t></w:r></w:p>'
+        '<w:tbl>'
+        '<w:tblPr/><w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid>'
+        '<w:tr>'
+        '<w:tc><w:p><w:r><w:t xml:space="preserve">USP</w:t></w:r></w:p></w:tc>'
+        '<w:tc><w:p><w:r><w:t xml:space="preserve">Chapter 621</w:t></w:r></w:p></w:tc>'
+        '</w:tr>'
+        '</w:tbl>'
+        '</w:footnote>'
+        '</w:footnotes>'
+    )
+    with zipfile.ZipFile(str(file_path), "r") as zin:
+        names = zin.namelist()
+        content_types_xml = zin.read("[Content_Types].xml").decode("utf-8")
+        rels_xml = zin.read("word/_rels/document.xml.rels").decode("utf-8")
+        other = {n: zin.read(n) for n in names if n not in ("[Content_Types].xml", "word/_rels/document.xml.rels")}
+    content_types_xml = content_types_xml.replace(
+        "</Types>",
+        '<Override PartName="/word/footnotes.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>',
+    )
+    rels_xml = rels_xml.replace(
+        "</Relationships>",
+        '<Relationship Id="rIdFootnotes" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" '
+        'Target="footnotes.xml"/></Relationships>',
+    )
+    with zipfile.ZipFile(str(file_path), "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr("[Content_Types].xml", content_types_xml)
+        zout.writestr("word/_rels/document.xml.rels", rels_xml)
+        zout.writestr("word/footnotes.xml", footnotes_xml)
+        for name, data in other.items():
+            zout.writestr(name, data)
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert texts == [
+        "Claim needing a reference standard.",
+        "Footnote 1", "Reference standards:", "USP", "Chapter 621",
+    ]
+    table_para = next(par for par in paragraphs if par.text == "USP")
+    assert table_para.from_table is False
+    assert table_para.table_position is None
+
+
+def test_extract_docx_separator_footnotes_are_never_extracted(tmp_path):
+    # A real separator/continuationSeparator footnote's body has no actual text (just
+    # a <w:separator/> marker element), and the body never actually references its id
+    # either - so excluding it by w:type wouldn't visibly change round-trip output on
+    # its own (nothing looks it up, and even if something did, it has no text to show).
+    # To genuinely exercise the w:type gate end-to-end, this constructs a deliberately
+    # unrealistic separator footnote that DOES carry real paragraph text, AND adds a
+    # body reference to its id - proving it's excluded even when referenced, not just
+    # coincidentally unreachable.
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph("Claim.")
+    _add_footnote_reference(p, "-1")
+    _add_footnote_reference(p, "1")
+    doc.save(str(file_path))
+    footnotes_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:type="separator" w:id="-1">'
+        + _paragraph_xml("This text should never be extracted.") + '</w:footnote>'
+        '<w:footnote w:id="1">' + _paragraph_xml("Real citation.") + '</w:footnote>'
+        '</w:footnotes>'
+    )
+    with zipfile.ZipFile(str(file_path), "r") as zin:
+        names = zin.namelist()
+        content_types_xml = zin.read("[Content_Types].xml").decode("utf-8")
+        rels_xml = zin.read("word/_rels/document.xml.rels").decode("utf-8")
+        other = {n: zin.read(n) for n in names if n not in ("[Content_Types].xml", "word/_rels/document.xml.rels")}
+    content_types_xml = content_types_xml.replace(
+        "</Types>",
+        '<Override PartName="/word/footnotes.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>',
+    )
+    rels_xml = rels_xml.replace(
+        "</Relationships>",
+        '<Relationship Id="rIdFootnotes" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" '
+        'Target="footnotes.xml"/></Relationships>',
+    )
+    with zipfile.ZipFile(str(file_path), "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr("[Content_Types].xml", content_types_xml)
+        zout.writestr("word/_rels/document.xml.rels", rels_xml)
+        zout.writestr("word/footnotes.xml", footnotes_xml)
+        for name, data in other.items():
+            zout.writestr(name, data)
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert "Real citation." in texts
+    assert "This text should never be extracted." not in texts
+
+
+def test_extract_docx_without_footnotes_is_unchanged(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Plain paragraph, no footnotes at all.")
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    assert [par.text for par in paragraphs] == ["Plain paragraph, no footnotes at all."]
+
+
+def test_extract_docx_reference_to_missing_footnote_id_is_skipped(tmp_path):
+    # Defensive case: a <w:footnoteReference> whose w:id has no matching <w:footnote>
+    # in footnotes.xml (a malformed document) is skipped silently, and extraction of
+    # everything else proceeds normally.
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    p = doc.add_paragraph("Claim with a dangling footnote reference.")
+    _add_footnote_reference(p, "99")
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Unrelated real footnote, different id."])])
+
+    paragraphs = extract_text(str(file_path), "docx")
+
+    texts = [par.text for par in paragraphs]
+    assert texts == ["Claim with a dangling footnote reference."]

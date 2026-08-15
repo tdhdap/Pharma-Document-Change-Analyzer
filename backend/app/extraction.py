@@ -322,9 +322,14 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
 
     paragraphs: list[Paragraph] = []
     index = 0
+    footnote_refs_in_order: list[str] = []
     for para, allow_text_pattern_heading, from_table, table_position in _iter_docx_paragraphs(
         doc.iter_inner_content(), table_id_counter=table_id_counter
     ):
+        # Collecting footnote reference ids here, in the same walk that already visits
+        # every body paragraph, avoids a second full-body traversal just to find them.
+        for ref in para._p.findall(".//" + qn("w:footnoteReference")):
+            footnote_refs_in_order.append(ref.get(qn("w:id")))
         model = _docx_paragraph_to_model(
             para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
         )
@@ -369,6 +374,26 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             index += 1
             for para in group:
                 model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading=False)
+                if model is not None:
+                    paragraphs.append(model)
+                    index += 1
+
+    footnotes_root = _footnotes_root(doc)
+    if footnotes_root is not None and footnote_refs_in_order:
+        footnote_content_by_id = _footnote_content_by_id(footnotes_root, doc)
+        footnote_number = 0
+        for footnote_id in footnote_refs_in_order:
+            group = footnote_content_by_id.get(footnote_id)
+            if not group:
+                continue
+            group = [p for p in group if p.text.strip()]
+            if not group:
+                continue
+            footnote_number += 1
+            paragraphs.append(Paragraph(text=f"Footnote {footnote_number}", paragraph_index=index, is_heading=True))
+            index += 1
+            for footnote_para in group:
+                model = _docx_paragraph_to_model(footnote_para, index, baseline_pt, allow_text_pattern_heading=False)
                 if model is not None:
                     paragraphs.append(model)
                     index += 1

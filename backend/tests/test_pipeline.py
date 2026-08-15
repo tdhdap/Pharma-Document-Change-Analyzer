@@ -1,5 +1,6 @@
 import os
 import tempfile
+import zipfile
 
 from docx import Document as DocxDocument
 from lxml import etree
@@ -528,6 +529,89 @@ def test_pipeline_adding_an_earlier_text_box_does_not_falsely_flag_later_one_as_
         _add_text_box_paragraph(new_doc, "NOTE: revision history updated.")
         _add_text_box_paragraph(new_doc, "Store samples at 25 C.")
         new_doc.save(new_path)
+
+        old_paragraphs = extract_text(old_path, "docx")
+        new_paragraphs = extract_text(new_path, "docx")
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
+
+    heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
+    assert heading_changed == []
+
+
+def _add_footnote_reference(paragraph, footnote_id):
+    p = paragraph._p
+    r = p.makeelement(qn("w:r"), {})
+    ref = r.makeelement(qn("w:footnoteReference"), {qn("w:id"): str(footnote_id)})
+    r.append(ref)
+    p.append(r)
+
+
+def _save_docx_with_footnotes(doc, path, footnotes):
+    doc.save(path)
+    footnote_blocks = "".join(
+        f'<w:footnote w:id="{fid}">'
+        + "".join(f'<w:p><w:r><w:t xml:space="preserve">{t}</w:t></w:r></w:p>' for t in texts)
+        + "</w:footnote>"
+        for fid, texts in footnotes
+    )
+    footnotes_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>'
+        '<w:footnote w:type="continuationSeparator" w:id="0">'
+        '<w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>'
+        f'{footnote_blocks}'
+        '</w:footnotes>'
+    )
+    with zipfile.ZipFile(path, "r") as zin:
+        names = zin.namelist()
+        content_types_xml = zin.read("[Content_Types].xml").decode("utf-8")
+        rels_xml = zin.read("word/_rels/document.xml.rels").decode("utf-8")
+        other = {n: zin.read(n) for n in names if n not in ("[Content_Types].xml", "word/_rels/document.xml.rels")}
+    content_types_xml = content_types_xml.replace(
+        "</Types>",
+        '<Override PartName="/word/footnotes.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>',
+    )
+    rels_xml = rels_xml.replace(
+        "</Relationships>",
+        '<Relationship Id="rIdFootnotes" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" '
+        'Target="footnotes.xml"/></Relationships>',
+    )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr("[Content_Types].xml", content_types_xml)
+        zout.writestr("word/_rels/document.xml.rels", rels_xml)
+        zout.writestr("word/footnotes.xml", footnotes_xml)
+        for name, data in other.items():
+            zout.writestr(name, data)
+
+
+def test_pipeline_adding_an_earlier_footnote_does_not_falsely_flag_later_one_as_changed():
+    # Regression test mirroring test_pipeline_adding_an_earlier_text_box_does_not_falsely_flag_later_one_as_changed:
+    # adding an earlier footnote reference shifts every later footnote's "Footnote N"
+    # number, even though its own content never changed. Without the guard added in
+    # this plan, this would spuriously produce section_heading_changed findings like
+    # "Footnote 1" -> "Footnote 2".
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        old_path = os.path.join(tmp_dir, "old.docx")
+        new_path = os.path.join(tmp_dir, "new.docx")
+
+        old_doc = DocxDocument()
+        old_p = old_doc.add_paragraph("Store samples per the stability protocol.")
+        _add_footnote_reference(old_p, "1")
+        _save_docx_with_footnotes(old_doc, old_path, [("1", ["Store samples at 25 C."])])
+
+        new_doc = DocxDocument()
+        new_p1 = new_doc.add_paragraph("Revision history updated for this release.")
+        _add_footnote_reference(new_p1, "1")
+        new_p2 = new_doc.add_paragraph("Store samples per the stability protocol.")
+        _add_footnote_reference(new_p2, "2")
+        _save_docx_with_footnotes(new_doc, new_path, [
+            ("1", ["NOTE: revision history updated."]),
+            ("2", ["Store samples at 25 C."]),
+        ])
 
         old_paragraphs = extract_text(old_path, "docx")
         new_paragraphs = extract_text(new_path, "docx")

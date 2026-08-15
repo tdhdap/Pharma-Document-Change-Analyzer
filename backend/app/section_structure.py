@@ -78,6 +78,13 @@ def _is_page_header_or_footer_heading(heading: str) -> bool:
     return bool(_PAGE_HEADER_FOOTER_PATTERN.match(heading))
 
 
+_TEXT_BOX_PATTERN = re.compile(r"^Text Box \d+$")
+
+
+def _is_text_box_heading(heading: str) -> bool:
+    return bool(_TEXT_BOX_PATTERN.match(heading))
+
+
 def detect_section_reordering(
     matches: list[SectionMatch],
     old_sections: list[Section],
@@ -178,6 +185,8 @@ def detect_section_heading_changed(
         if is_synthetic_heading(old_heading) or is_synthetic_heading(new_heading):
             continue
         if _is_page_header_or_footer_heading(old_heading) or _is_page_header_or_footer_heading(new_heading):
+            continue
+        if _is_text_box_heading(old_heading) or _is_text_box_heading(new_heading):
             continue
         old_split = _split_heading_number(old_heading)
         new_split = _split_heading_number(new_heading)

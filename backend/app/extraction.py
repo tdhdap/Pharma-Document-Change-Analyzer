@@ -10,6 +10,23 @@ from docx.text.paragraph import Paragraph as DocxParagraph
 from app.models import Paragraph, TableCoordinate
 from app.sectioning import _looks_like_heading_shape
 
+_MC_FALLBACK_TAG = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+
+
+def _has_mc_fallback_ancestor(element) -> bool:
+    # Word 2010+ wraps one user-inserted text box in a single mc:AlternateContent
+    # element containing BOTH representations (mc:Choice = DrawingML, mc:Fallback =
+    # VML) of the identical content - verified empirically against Word's real
+    # output shape. Skipping anything under mc:Fallback keeps exactly the mc:Choice
+    # copy, avoiding double extraction of the same box's content.
+    ancestor = element.getparent()
+    while ancestor is not None:
+        if ancestor.tag == _MC_FALLBACK_TAG:
+            return True
+        ancestor = ancestor.getparent()
+    return False
+
+
 HEADING_STYLE_PREFIXES = ("Heading", "Title")
 
 DOCX_DEFAULT_BODY_SIZE_PT = 11.0
@@ -141,6 +158,14 @@ def _docx_paragraph_to_model(
     )
 
 
+def _txbx_content_iter(txbx_element, doc):
+    for child in txbx_element:
+        if child.tag == qn("w:p"):
+            yield DocxParagraph(child, doc)
+        elif child.tag == qn("w:tbl"):
+            yield DocxTable(child, doc)
+
+
 def _iter_text_box_paragraphs(root_element, doc):
     # python-docx has no API for text boxes at all - a paragraph containing one
     # reads as completely empty through every normal reading path (verified
@@ -150,8 +175,22 @@ def _iter_text_box_paragraphs(root_element, doc):
     # no format-specific branching. The search is transitive (".//"), so it finds
     # text boxes at any nesting depth - inside table cells, inside other text
     # boxes, etc. - with no special recursion needed, unlike table extraction.
+    #
+    # Word 2010+ additionally wraps a single user-inserted text box in
+    # mc:AlternateContent, containing both a DrawingML and a VML copy of the
+    # identical content - _has_mc_fallback_ancestor skips the redundant VML
+    # copy so each real text box is extracted exactly once.
+    #
+    # A text box's own content can itself contain a table (e.g. a callout box
+    # with a small limits table) - _txbx_content_iter + _iter_docx_paragraphs
+    # reuses the same table-walking logic the main body/header/footer walks
+    # already use, so that content isn't silently dropped. Its from_table/
+    # table_position outputs are discarded below - text-box content always
+    # stays from_table=False/table_position=None regardless of origin.
     for txbx in root_element.findall(".//" + qn("w:txbxContent")):
-        yield [DocxParagraph(raw_p, doc) for raw_p in txbx.findall(qn("w:p"))]
+        if _has_mc_fallback_ancestor(txbx):
+            continue
+        yield [para for para, _, _, _ in _iter_docx_paragraphs(_txbx_content_iter(txbx, doc))]
 
 
 def _docx_header_footer_specs(doc) -> list[tuple[str, int, str, object]]:

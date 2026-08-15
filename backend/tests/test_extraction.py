@@ -1302,3 +1302,106 @@ def test_extract_docx_without_text_boxes_is_unchanged(tmp_path):
     assert len(paragraphs) == 2
     assert paragraphs[0].text == "1.0 Scope"
     assert paragraphs[1].text == "This procedure applies to all testing."
+
+
+_MC_ALTERNATE_CONTENT_TEXTBOX_XML = """<mc:AlternateContent xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:v="urn:schemas-microsoft-com:vml"
+    xmlns:o="urn:schemas-microsoft-com:office:office">
+  <mc:Choice Requires="wps">
+    <w:drawing>
+      <wp:inline>
+        <a:graphic>
+          <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+            <wps:wsp>
+              <wps:txbx>
+                <w:txbxContent>{paragraphs}</w:txbxContent>
+              </wps:txbx>
+            </wps:wsp>
+          </a:graphicData>
+        </a:graphic>
+      </wp:inline>
+    </w:drawing>
+  </mc:Choice>
+  <mc:Fallback>
+    <w:pict>
+      <v:shape>
+        <v:textbox>
+          <w:txbxContent>{paragraphs}</w:txbxContent>
+        </v:textbox>
+      </v:shape>
+    </w:pict>
+  </mc:Fallback>
+</mc:AlternateContent>"""
+
+
+def _add_mc_alternate_content_text_box(container_element, paragraph_texts):
+    """Inject a text box the way real Word 2010+ writes it: one
+    mc:AlternateContent element wrapping BOTH a DrawingML (mc:Choice) and VML
+    (mc:Fallback) copy of the identical content - verified empirically to match
+    Word's actual output shape. Mirrors _add_text_box's construction pattern."""
+    p = container_element.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    paragraphs_xml = "".join(_paragraph_xml(text) for text in paragraph_texts)
+    mc = etree.fromstring(_MC_ALTERNATE_CONTENT_TEXTBOX_XML.format(paragraphs=paragraphs_xml).encode())
+    r.append(mc)
+    container_element.append(p)
+
+
+def test_iter_text_box_paragraphs_deduplicates_word_mc_alternate_content():
+    doc = DocxDocument()
+    body = doc.element.body
+    _add_mc_alternate_content_text_box(body, ["Caution: wear gloves."])
+
+    groups = list(_iter_text_box_paragraphs(body, doc))
+
+    assert len(groups) == 1
+    assert [para.text for para in groups[0]] == ["Caution: wear gloves."]
+
+
+_DRAWINGML_TEXTBOX_WITH_TABLE_XML = """<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <wp:inline>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp>
+          <wps:txbx>
+            <w:txbxContent>
+              <w:p><w:r><w:t xml:space="preserve">Caption above table.</w:t></w:r></w:p>
+              <w:tbl>
+                <w:tblPr/>
+                <w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid>
+                <w:tr>
+                  <w:tc><w:p><w:r><w:t xml:space="preserve">Spec limit</w:t></w:r></w:p></w:tc>
+                  <w:tc><w:p><w:r><w:t xml:space="preserve">NMT 2.0%</w:t></w:r></w:p></w:tc>
+                </w:tr>
+              </w:tbl>
+            </w:txbxContent>
+          </wps:txbx>
+        </wps:wsp>
+      </a:graphicData>
+    </a:graphic>
+  </wp:inline>
+</w:drawing>"""
+
+
+def test_iter_text_box_paragraphs_extracts_nested_table_content():
+    doc = DocxDocument()
+    body = doc.element.body
+    p = body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    drawing = etree.fromstring(_DRAWINGML_TEXTBOX_WITH_TABLE_XML.encode())
+    r.append(drawing)
+    body.append(p)
+
+    groups = list(_iter_text_box_paragraphs(body, doc))
+
+    assert len(groups) == 1
+    assert [para.text for para in groups[0]] == ["Caption above table.", "Spec limit", "NMT 2.0%"]

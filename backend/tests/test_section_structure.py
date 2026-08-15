@@ -465,3 +465,22 @@ def test_page_footer_deleted_is_still_flagged_as_section_deleted():
 
     assert len(changes) == 1
     assert changes[0].change_type == "section_deleted"
+
+
+def test_text_box_renumbering_is_not_flagged_as_heading_changed():
+    old_sections = [Section(heading="Text Box 1", paragraphs=[Paragraph(text="Store at 25 C.")])]
+    new_sections = [Section(heading="Text Box 2", paragraphs=[Paragraph(text="Store at 25 C.")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    assert detect_section_heading_changed(matches, old_sections, new_sections) == []
+
+
+def test_text_box_added_is_still_flagged_as_section_added():
+    # Regression guard proving the narrower fix does NOT suppress section_added
+    # for a genuinely new text box (mirrors test_page_header_added_is_still_flagged_as_section_added).
+    new_sections = [Section(heading="Text Box 1", paragraphs=[Paragraph(text="New note.")])]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "section_added"

@@ -2,6 +2,8 @@ import os
 import tempfile
 
 from docx import Document as DocxDocument
+from lxml import etree
+from docx.oxml.ns import qn
 
 from app import pipeline, llm_classifier
 from app.extraction import extract_text
@@ -473,6 +475,64 @@ def test_pipeline_adding_a_section_break_does_not_falsely_flag_header_footer_as_
         new_extracted = extract_text(new_path, "docx")
 
     result = pipeline.compare_documents(old_extracted, new_extracted, "old.docx", "new.docx")
+
+    heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
+    assert heading_changed == []
+
+
+_TEXT_BOX_DRAWING_XML = """<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <wp:inline>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp>
+          <wps:txbx>
+            <w:txbxContent><w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:txbxContent>
+          </wps:txbx>
+        </wps:wsp>
+      </a:graphicData>
+    </a:graphic>
+  </wp:inline>
+</w:drawing>"""
+
+
+def _add_text_box_paragraph(doc, text):
+    body = doc.element.body
+    p = body.makeelement(qn("w:p"), {})
+    r = p.makeelement(qn("w:r"), {})
+    p.append(r)
+    drawing = etree.fromstring(_TEXT_BOX_DRAWING_XML.format(text=text).encode())
+    r.append(drawing)
+    body.append(p)
+
+
+def test_pipeline_adding_an_earlier_text_box_does_not_falsely_flag_later_one_as_changed():
+    # Regression test for the exact scenario this plan's final whole-branch
+    # review found broken: adding an earlier text box shifts every later text
+    # box's "Text Box N" number, even though its own content never changed.
+    # Before the fix, this spuriously produced section_heading_changed findings
+    # like "Text Box 1" -> "Text Box 2".
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        old_path = os.path.join(tmp_dir, "old.docx")
+        new_path = os.path.join(tmp_dir, "new.docx")
+
+        old_doc = DocxDocument()
+        old_doc.add_paragraph("Body content here.")
+        _add_text_box_paragraph(old_doc, "Store samples at 25 C.")
+        old_doc.save(old_path)
+
+        new_doc = DocxDocument()
+        new_doc.add_paragraph("Body content here.")
+        _add_text_box_paragraph(new_doc, "NOTE: revision history updated.")
+        _add_text_box_paragraph(new_doc, "Store samples at 25 C.")
+        new_doc.save(new_path)
+
+        old_paragraphs = extract_text(old_path, "docx")
+        new_paragraphs = extract_text(new_path, "docx")
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.docx", "new.docx")
 
     heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
     assert heading_changed == []

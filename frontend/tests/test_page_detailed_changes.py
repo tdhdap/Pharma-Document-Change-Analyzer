@@ -110,27 +110,67 @@ def test_page_no_high_risk_group_defaults_collapsed():
     assert body_section_expander.proto.expanded is False
 
 
-def test_page_table_category_shows_table_id_row_col_columns():
+def test_page_table_category_shows_row_col_columns_1_indexed():
     at = _run_page_with(_ALL_CATEGORY_CHANGES)
     assert not at.exception
     table_values = [t.value for t in at.table]
-    matching = [df for df in table_values if "Table ID" in df.columns]
+    # Table-style rows are identified by having Row/Col columns; Table ID is no longer a
+    # per-row column at all - it's shown once as a "**Table N**" header above the group.
+    matching = [df for df in table_values if "Row" in df.columns]
     assert len(matching) == 1
     df = matching[0]
-    assert list(df.columns) == ["Table ID", "Row", "Col", "Old Text", "New Text", "Change Type", "Risk", "Reason"]
-    assert df.iloc[0]["Row"] == "1"
-    assert df.iloc[0]["Col"] == "2"
+    assert list(df.columns) == ["Row", "Col", "Old Text", "New Text", "Change Type", "Risk", "Reason"]
+    # old_table_position/new_table_position both have row=1, col=2 (0-indexed) -> displayed 1-indexed.
+    assert df.iloc[0]["Row"] == "2"
+    assert df.iloc[0]["Col"] == "3"
 
 
-def test_page_body_category_has_no_table_cell_column():
+def test_page_table_category_shows_table_header_1_indexed():
+    at = _run_page_with(_ALL_CATEGORY_CHANGES)
+    assert not at.exception
+    markdown_values = [m.value for m in at.markdown]
+    # old_table_position/new_table_position both have table_id=0 (0-indexed) -> "Table 1".
+    assert any(v == "**Table 1**" for v in markdown_values)
+
+
+def test_page_table_category_groups_multiple_tables_under_separate_headers():
+    changes = [
+        {
+            "change_id": "t1", "section": "4.0 Procedure", "source": "Table", "change_type": "numeric_change",
+            "old_text": "14.8 kN", "new_text": "15.1 kN", "ai_risk_level": "High",
+            "reviewer_risk_level": None, "reason": "value changed",
+            "old_table_position": {"table_id": 0, "row": 1, "col": 2},
+            "new_table_position": {"table_id": 0, "row": 1, "col": 2},
+        },
+        {
+            "change_id": "t2", "section": "4.0 Procedure", "source": "Table", "change_type": "numeric_change",
+            "old_text": "500 mg", "new_text": "510 mg", "ai_risk_level": "High",
+            "reviewer_risk_level": None, "reason": "value changed",
+            "old_table_position": {"table_id": 1, "row": 0, "col": 1},
+            "new_table_position": {"table_id": 1, "row": 0, "col": 1},
+        },
+    ]
+    at = _run_page_with(changes)
+    assert not at.exception
+    markdown_values = [m.value for m in at.markdown]
+    assert "**Table 1**" in markdown_values
+    assert "**Table 2**" in markdown_values
+    table_values = [t.value for t in at.table if "Row" in t.value.columns]
+    assert len(table_values) == 2
+    assert table_values[0].iloc[0]["Row"] == "2"
+    assert table_values[1].iloc[0]["Row"] == "1"
+
+
+def test_page_body_category_has_no_row_col_or_table_cell_column():
     at = _run_page_with(_ALL_CATEGORY_CHANGES)
     assert not at.exception
     table_values = [t.value for t in at.table]
-    body_style = [df for df in table_values if "Table ID" not in df.columns]
+    body_style = [df for df in table_values if "Row" not in df.columns]
     assert len(body_style) >= 1
     for df in body_style:
         assert "Table Cell" not in df.columns
         assert "Source" not in df.columns
+        assert "Col" not in df.columns
 
 
 def test_page_filters_narrow_results_within_groups():

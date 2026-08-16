@@ -1,7 +1,7 @@
 from logic import (
     filter_changes, build_change_update_payload, format_table_cell,
     categorize_change, group_changes_for_display, compute_risk_counts,
-    format_group_label, has_high_risk, format_table_coordinates,
+    format_group_label, has_high_risk, format_table_coordinates, table_group_key,
 )
 
 CHANGES = [
@@ -230,31 +230,63 @@ def test_has_high_risk_respects_reviewer_override_downgrade():
 
 
 def test_format_table_coordinates_both_none():
-    assert format_table_coordinates(None, None) == ("", "", "")
+    assert format_table_coordinates(None, None) == ("", "")
 
 
-def test_format_table_coordinates_identical_positions():
+def test_format_table_coordinates_identical_positions_are_1_indexed():
     position = {"table_id": 0, "row": 1, "col": 2}
-    assert format_table_coordinates(position, position) == ("0", "1", "2")
+    assert format_table_coordinates(position, position) == ("2", "3")
 
 
-def test_format_table_coordinates_only_new_present():
+def test_format_table_coordinates_only_new_present_is_1_indexed():
     new_position = {"table_id": 0, "row": 3, "col": 0}
-    assert format_table_coordinates(None, new_position) == ("0", "3", "0")
+    assert format_table_coordinates(None, new_position) == ("4", "1")
 
 
-def test_format_table_coordinates_only_old_present():
+def test_format_table_coordinates_only_old_present_is_1_indexed():
     old_position = {"table_id": 0, "row": 2, "col": 1}
-    assert format_table_coordinates(old_position, None) == ("0", "2", "1")
+    assert format_table_coordinates(old_position, None) == ("3", "2")
 
 
-def test_format_table_coordinates_row_moved_col_same():
+def test_format_table_coordinates_row_moved_col_same_is_1_indexed():
     old_position = {"table_id": 0, "row": 1, "col": 0}
     new_position = {"table_id": 0, "row": 3, "col": 0}
-    assert format_table_coordinates(old_position, new_position) == ("0", "1 → 3", "0")
+    assert format_table_coordinates(old_position, new_position) == ("2 → 4", "1")
 
 
-def test_format_table_coordinates_table_id_and_col_moved_row_same():
+def test_format_table_coordinates_col_moved_row_same_is_1_indexed():
     old_position = {"table_id": 0, "row": 1, "col": 0}
     new_position = {"table_id": 1, "row": 1, "col": 2}
-    assert format_table_coordinates(old_position, new_position) == ("0 → 1", "1", "0 → 2")
+    assert format_table_coordinates(old_position, new_position) == ("2", "1 → 3")
+
+
+def test_table_group_key_uses_new_position_table_id_when_both_present():
+    change = {
+        "old_table_position": {"table_id": 0, "row": 1, "col": 0},
+        "new_table_position": {"table_id": 0, "row": 1, "col": 0},
+    }
+    assert table_group_key(change) == 0
+
+
+def test_table_group_key_uses_new_position_table_id_when_it_differs_from_old():
+    change = {
+        "old_table_position": {"table_id": 0, "row": 1, "col": 0},
+        "new_table_position": {"table_id": 1, "row": 1, "col": 2},
+    }
+    assert table_group_key(change) == 1
+
+
+def test_table_group_key_falls_back_to_old_position_when_new_is_absent():
+    change = {
+        "old_table_position": {"table_id": 2, "row": 0, "col": 0},
+        "new_table_position": None,
+    }
+    assert table_group_key(change) == 2
+
+
+def test_table_group_key_uses_new_position_when_old_is_absent():
+    change = {
+        "old_table_position": None,
+        "new_table_position": {"table_id": 3, "row": 0, "col": 0},
+    }
+    assert table_group_key(change) == 3

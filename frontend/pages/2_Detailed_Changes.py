@@ -1,6 +1,9 @@
 import streamlit as st
 
-from logic import filter_changes, group_changes_for_display, format_group_label, has_high_risk, format_table_coordinates
+from logic import (
+    filter_changes, group_changes_for_display, format_group_label, has_high_risk,
+    format_table_coordinates, table_group_key,
+)
 from bootstrap import ensure_backend_running
 
 st.set_page_config(layout="wide")
@@ -57,20 +60,24 @@ else:
         ])
 
     def render_table_rows(group_changes):
-        rows = []
-        for c in group_changes:
-            table_id, row, col = format_table_coordinates(c.get("old_table_position"), c.get("new_table_position"))
-            rows.append({
-                "Table ID": table_id,
-                "Row": row,
-                "Col": col,
-                "Old Text": c["old_text"],
-                "New Text": c["new_text"],
-                "Change Type": c["change_type"],
-                "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
-                "Reason": c["reason"],
-            })
-        st.table(rows)
+        table_ids = sorted({table_group_key(c) for c in group_changes})
+        for table_id in table_ids:
+            st.markdown(f"**Table {table_id + 1}**")
+            rows = []
+            for c in group_changes:
+                if table_group_key(c) != table_id:
+                    continue
+                row, col = format_table_coordinates(c.get("old_table_position"), c.get("new_table_position"))
+                rows.append({
+                    "Row": row,
+                    "Col": col,
+                    "Old Text": c["old_text"],
+                    "New Text": c["new_text"],
+                    "Change Type": c["change_type"],
+                    "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
+                    "Reason": c["reason"],
+                })
+            st.table(rows)
 
     for category in ("Headers", "Footers"):
         category_changes = grouped[category]

@@ -90,14 +90,21 @@ def has_high_risk(changes: list[dict]) -> bool:
     return any(_change_risk(c) == "High" for c in changes)
 
 
-def format_table_coordinates(old_position: dict | None, new_position: dict | None) -> tuple[str, str, str]:
+def table_group_key(change: dict) -> int:
+    new_position = change.get("new_table_position")
+    old_position = change.get("old_table_position")
+    position = new_position if new_position is not None else old_position
+    return position["table_id"]
+
+
+def format_table_coordinates(old_position: dict | None, new_position: dict | None) -> tuple[str, str]:
     if old_position is None and new_position is None:
-        return "", "", ""
+        return "", ""
 
     def field(key: str) -> str:
         if old_position is not None and new_position is not None and old_position[key] != new_position[key]:
-            return f"{old_position[key]} → {new_position[key]}"
+            return f"{old_position[key] + 1} → {new_position[key] + 1}"
         source = new_position if new_position is not None else old_position
-        return str(source[key])
+        return str(source[key] + 1)
 
-    return field("table_id"), field("row"), field("col")
+    return field("row"), field("col")

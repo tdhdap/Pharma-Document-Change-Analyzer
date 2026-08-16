@@ -142,3 +142,26 @@ def test_page_filters_narrow_results_within_groups():
     # With only High-risk changes surviving the filter, Body's only change (Medium) is filtered
     # out, so Body should show 0 changes while Headers/Tables (both High) still show theirs.
     assert any(l == "Body — 0 changes" for l in labels)
+
+
+def test_page_headers_category_distinguishes_multiple_variants():
+    # Regression test for the exact scenario the final whole-branch review
+    # found broken: two different header variants changing independently
+    # were rendered as indistinguishable rows with no Section column.
+    changes = [
+        {
+            "change_id": "h1", "section": "Page Header", "source": "Body", "change_type": "numeric_change",
+            "old_text": "Confidential - SOP-1234", "new_text": "Confidential - SOP-5678",
+            "ai_risk_level": "High", "reviewer_risk_level": None, "reason": "doc number changed",
+        },
+        {
+            "change_id": "h2", "section": "Page Header (First Page)", "source": "Body",
+            "change_type": "clarification_no_meaning_change",
+            "old_text": "DRAFT - For Review Only", "new_text": "APPROVED - For Distribution",
+            "ai_risk_level": "Low", "reviewer_risk_level": None, "reason": "status updated",
+        },
+    ]
+    at = _run_page_with(changes)
+    assert not at.exception
+    headers_table = next(t.value for t in at.table if "Section" in t.value.columns)
+    assert list(headers_table["Section"]) == ["Page Header", "Page Header (First Page)"]

@@ -31,6 +31,19 @@ else:
 
     grouped = group_changes_for_display(filtered)
 
+    def render_header_footer_rows(group_changes):
+        st.table([
+            {
+                "Section": c["section"],
+                "Old Text": c["old_text"],
+                "New Text": c["new_text"],
+                "Change Type": c["change_type"],
+                "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
+                "Reason": c["reason"],
+            }
+            for c in group_changes
+        ])
+
     def render_body_rows(group_changes):
         st.table([
             {
@@ -63,7 +76,7 @@ else:
         category_changes = grouped[category]
         with st.expander(format_group_label(category, category_changes), expanded=has_high_risk(category_changes)):
             if category_changes:
-                render_body_rows(category_changes)
+                render_header_footer_rows(category_changes)
             else:
                 st.caption("No changes.")
 

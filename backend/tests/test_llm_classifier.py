@@ -56,6 +56,72 @@ def test_gemini_failure_falls_back_to_unclassified(monkeypatch):
     assert {r.change_id for r in results} == {"c1", "c2"}
 
 
+class _FakeApiError(Exception):
+    """Mimics google.genai's APIError, which exposes the HTTP status as .code -
+    verified against a real 429 from the live API before writing these tests."""
+
+    def __init__(self, code):
+        super().__init__(f"fake api error {code}")
+        self.code = code
+
+
+def test_transient_error_is_retried_and_can_succeed(monkeypatch):
+    unresolved = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
+    attempts = []
+
+    def flaky_call(items, model_name):
+        attempts.append(model_name)
+        if len(attempts) < 3:
+            raise _FakeApiError(503)
+        return json.dumps([
+            {"change_id": "c1", "change_type": "formatting_only", "reason": "ok", "confidence": 0.8}
+        ])
+
+    monkeypatch.setattr(llm_classifier, "_call_gemini", flaky_call)
+    monkeypatch.setattr(llm_classifier.time, "sleep", lambda _s: None)
+
+    results = classify_changes_batch(unresolved)
+
+    assert len(attempts) == 3
+    assert results[0].change_type == "formatting_only"
+
+
+def test_retryable_error_falls_back_after_max_attempts(monkeypatch):
+    unresolved = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
+    attempts = []
+
+    def always_rate_limited(items, model_name):
+        attempts.append(model_name)
+        raise _FakeApiError(429)
+
+    monkeypatch.setattr(llm_classifier, "_call_gemini", always_rate_limited)
+    monkeypatch.setattr(llm_classifier.time, "sleep", lambda _s: None)
+
+    results = classify_changes_batch(unresolved)
+
+    assert len(attempts) == llm_classifier._MAX_ATTEMPTS
+    assert results[0].change_type == "unclassified"
+
+
+def test_non_retryable_error_fails_fast_without_retrying(monkeypatch):
+    # A 404 (unknown model) will never fix itself - burning retries and backoff
+    # sleeps on it just delays the report for no benefit.
+    unresolved = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
+    attempts = []
+
+    def unknown_model(items, model_name):
+        attempts.append(model_name)
+        raise _FakeApiError(404)
+
+    monkeypatch.setattr(llm_classifier, "_call_gemini", unknown_model)
+    monkeypatch.setattr(llm_classifier.time, "sleep", lambda _s: None)
+
+    results = classify_changes_batch(unresolved)
+
+    assert len(attempts) == 1
+    assert results[0].change_type == "unclassified"
+
+
 def test_change_type_outside_semantic_types_is_forced_to_unclassified(monkeypatch):
     unresolved = [{"change_id": "c1", "old_text": "a", "new_text": "b"}]
 

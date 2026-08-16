@@ -1,4 +1,5 @@
 import json
+import time
 
 from google import genai
 
@@ -102,11 +103,32 @@ def _fallback(unresolved: list[dict]) -> list[LLMClassification]:
     ]
 
 
+# Transient server-side conditions worth a retry: 429 (rate limited - the API returns
+# this both for short-window limits that clear in seconds and for daily caps that don't,
+# and we can't reliably tell them apart from the response), plus the 5xx overload family.
+# A 503 "model is overloaded" was observed repeatedly in practice, and without a retry a
+# single blip permanently marked otherwise-classifiable changes as "unclassified" in the
+# saved report. Anything else (400 bad request, 404 unknown model, a parse failure) will
+# not fix itself on a retry, so those fall back immediately.
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 3
+_BACKOFF_BASE_SECONDS = 2.0
+
+
+def _is_retryable(exc: Exception) -> bool:
+    return getattr(exc, "code", None) in _RETRYABLE_STATUS_CODES
+
+
 def classify_changes_batch(unresolved: list[dict]) -> list[LLMClassification]:
     if not unresolved:
         return []
-    try:
-        raw = _call_gemini(unresolved, config.GEMINI_MODEL)
-        return _parse_response(raw, unresolved)
-    except Exception:
-        return _fallback(unresolved)
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            raw = _call_gemini(unresolved, config.GEMINI_MODEL)
+            return _parse_response(raw, unresolved)
+        except Exception as exc:
+            is_last_attempt = attempt == _MAX_ATTEMPTS - 1
+            if is_last_attempt or not _is_retryable(exc):
+                return _fallback(unresolved)
+            time.sleep(_BACKOFF_BASE_SECONDS * (2 ** attempt))
+    return _fallback(unresolved)

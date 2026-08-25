@@ -126,6 +126,17 @@ def compare_documents(
             reason=reason, source=source,
             old_table_position=mv.old_paragraph.table_position, new_table_position=mv.new_paragraph.table_position,
         ))
+        # A relocation must not hide an edit. Reusing the same detection path a
+        # stationary edited paragraph gets means moved content is scrutinised
+        # identically - regex detectors plus AI classification for whatever they
+        # don't explain. When the text is unchanged this returns nothing, so pure
+        # moves stay a single row. Filed under new_section because that is where
+        # the paragraph now lives, and where a reviewer will look for it.
+        moved_content_changes, moved_already_detected = _build_paragraph_changes(
+            mv.new_section, mv.old_paragraph, mv.new_paragraph
+        )
+        changes.extend(moved_content_changes)
+        already_detected_by_id.update(moved_already_detected)
 
     for p, section in remaining_deletes:
         if id(p) in whole_deleted_paragraph_ids:

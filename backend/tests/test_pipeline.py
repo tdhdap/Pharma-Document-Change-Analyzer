@@ -620,3 +620,236 @@ def test_pipeline_adding_an_earlier_footnote_does_not_falsely_flag_later_one_as_
 
     heading_changed = [c for c in result.changes if c.change_type == "section_heading_changed"]
     assert heading_changed == []
+
+
+def test_moved_paragraph_that_was_also_edited_reports_both_move_and_content_change(monkeypatch):
+    # A relocation must never mask an edit: a spec value changing while the
+    # paragraph moves is exactly the high-consequence case the 0.85 move-matching
+    # threshold is most likely to swallow.
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected - the numeric regex fully explains this change")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="Compression force shall be maintained at 15 kN."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="Compression force shall be maintained at 18 kN."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert "moved_paragraph" in change_types
+    assert "numeric_change" in change_types
+
+
+def test_moved_paragraph_content_change_is_filed_under_the_new_section(monkeypatch):
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="Compression force shall be maintained at 15 kN."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="Compression force shall be maintained at 18 kN."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    numeric = [c for c in result.changes if c.change_type == "numeric_change"]
+    assert len(numeric) == 1
+    # Filed where the paragraph now lives, so it groups with that section's other
+    # changes in the UI - not under the move row's compound "old -> new" label.
+    assert numeric[0].section == "2.0 Storage"
+
+
+def test_moved_paragraph_content_change_carries_its_own_real_risk(monkeypatch):
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="Compression force shall be maintained at 15 kN."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="Compression force shall be maintained at 18 kN."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    numeric = [c for c in result.changes if c.change_type == "numeric_change"]
+    # The whole point of the fix: severity rides on its own row instead of being
+    # downgraded to the move row's default.
+    assert numeric[0].ai_risk_level == "High"
+
+
+def test_moved_table_content_that_was_also_edited_reports_both(monkeypatch):
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    position = TableCoordinate(table_id=0, row=1, col=2)
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines the tablet compression process fully."),
+        Paragraph(text="Assay limit 95.0 percent", from_table=True, table_position=position),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines the tablet compression process fully."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="Assay limit 98.0 percent", from_table=True, table_position=position),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert "moved_table_content" in change_types
+    numeric = [c for c in result.changes if c.change_type == "numeric_change"]
+    assert len(numeric) == 1
+    assert numeric[0].source == "Table"
+    assert numeric[0].new_table_position == position
+
+
+def test_pure_move_with_identical_text_produces_only_the_move_row(monkeypatch):
+    # Regression guard: the fix must not duplicate-report relocations that
+    # didn't change anything.
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected for an unchanged relocation")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="Compression force shall be maintained at 15 kN."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="Compression force shall be maintained at 15 kN."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    assert len(result.changes) == 1
+    assert result.changes[0].change_type == "moved_paragraph"
+
+
+def test_moved_paragraph_with_semantic_only_change_is_ai_classified(monkeypatch):
+    def fake_classify(unresolved):
+        return [
+            LLMClassification(
+                change_id=item["change_id"],
+                change_type="role_responsibility_change",
+                reason="Approval responsibility changed.",
+                confidence=0.9,
+            )
+            for item in unresolved
+        ]
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fake_classify)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="The QC Manager shall approve the completed batch record."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="The QA Manager shall approve the completed batch record."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert "moved_paragraph" in change_types
+    assert "role_responsibility_change" in change_types
+    # The internal placeholder must never survive into the report.
+    assert "pending_llm_classification" not in change_types
+
+
+def test_moved_paragraph_tells_the_ai_which_change_types_regex_already_caught(monkeypatch):
+    # A moved paragraph carrying BOTH a numeric edit and a residual semantic edit
+    # must pass the already_detected hint through, so the AI classifies only the
+    # genuinely distinct change instead of restating the numeric one.
+    captured = {}
+
+    def capturing_classify(unresolved):
+        captured["items"] = unresolved
+        return [
+            LLMClassification(
+                change_id=item["change_id"],
+                change_type="role_responsibility_change",
+                reason="Approval responsibility changed.",
+                confidence=0.9,
+            )
+            for item in unresolved
+        ]
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", capturing_classify)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="The QC Manager shall verify 15 kN compression force."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines tablet compression for all product lines."),
+        Paragraph(text="2.0 Storage"),
+        Paragraph(text="Store finished product in a controlled warehouse area."),
+        Paragraph(text="The QA Manager shall verify 18 kN compression force."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    assert captured["items"], "the AI classifier should have been called"
+    assert captured["items"][0]["already_detected"] == ["numeric_change"]
+    change_types = [c.change_type for c in result.changes]
+    assert "numeric_change" in change_types
+    assert "role_responsibility_change" in change_types

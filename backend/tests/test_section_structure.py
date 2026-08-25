@@ -1,7 +1,8 @@
-from app.models import Section, Paragraph, SectionMatch
+from app.models import Section, Paragraph, SectionMatch, TableCoordinate
 from app.section_structure import (
     detect_section_renumbering, detect_section_reordering,
     detect_section_added, detect_section_deleted, detect_section_heading_changed,
+    _summarize_section_content,
 )
 
 
@@ -233,7 +234,7 @@ def test_new_section_with_body_is_detected():
         "Environmental monitoring of the manufacturing area shall be performed weekly.\n"
         "Settle plates shall be used at each critical location."
     )
-    assert c.reason == "New section added: '5.0 Environmental Monitoring'."
+    assert c.reason == "New section added: '5.0 Environmental Monitoring'. 2 paragraphs."
     assert c.ai_risk_level == "High"
     assert c.source == "Body"
     assert c.confidence == 1.0
@@ -296,7 +297,7 @@ def test_deleted_section_with_body_is_detected():
     assert c.section == "8.0 Deviation Handling"
     assert c.old_text == "8.0 Deviation Handling\nAny deviation from this procedure shall be documented."
     assert c.new_text == ""
-    assert c.reason == "Section deleted: '8.0 Deviation Handling'."
+    assert c.reason == "Section deleted: '8.0 Deviation Handling'. 1 paragraph."
     assert c.ai_risk_level == "High"
     assert c.source == "Body"
     assert c.confidence == 1.0
@@ -503,3 +504,103 @@ def test_footnote_added_is_still_flagged_as_section_added():
 
     assert len(changes) == 1
     assert changes[0].change_type == "section_added"
+
+
+def _table_cell(text, table_id, row=0, col=0):
+    return Paragraph(
+        text=text,
+        from_table=True,
+        table_position=TableCoordinate(table_id=table_id, row=row, col=col),
+    )
+
+
+def test_summary_counts_paragraphs_only():
+    paragraphs = [Paragraph(text="first"), Paragraph(text="second")]
+    assert _summarize_section_content(paragraphs) == "2 paragraphs."
+
+
+def test_summary_uses_singular_for_one_paragraph():
+    assert _summarize_section_content([Paragraph(text="only one")]) == "1 paragraph."
+
+
+def test_summary_counts_a_table_once_not_once_per_cell():
+    # The miscount this whole feature exists to avoid: a 4x3 table is stored as
+    # twelve Paragraph objects sharing one table_id, and must read as "1 table"
+    # rather than "12 paragraphs".
+    cells = [_table_cell(f"cell {i}", table_id=0, row=i // 3, col=i % 3) for i in range(12)]
+    assert _summarize_section_content(cells) == "1 table."
+
+
+def test_summary_counts_paragraphs_and_tables_together():
+    paragraphs = [Paragraph(text="intro")]
+    paragraphs += [_table_cell(f"cell {i}", table_id=0) for i in range(6)]
+    assert _summarize_section_content(paragraphs) == "1 paragraph, 1 table."
+
+
+def test_summary_counts_distinct_tables():
+    paragraphs = [
+        _table_cell("a", table_id=0),
+        _table_cell("b", table_id=0),
+        _table_cell("c", table_id=1),
+    ]
+    assert _summarize_section_content(paragraphs) == "2 tables."
+
+
+def test_summary_of_empty_section_is_no_content():
+    assert _summarize_section_content([]) == "No content."
+
+
+def test_section_added_reason_includes_content_summary():
+    new_sections = [
+        Section(heading="4.0 Procedure", paragraphs=[
+            Paragraph(text="Compression force shall be maintained at 15 kN."),
+            _table_cell("Parameter", table_id=0),
+            _table_cell("Target", table_id=0),
+        ]),
+    ]
+
+    changes = detect_section_added([0], new_sections)
+
+    assert changes[0].reason == "New section added: '4.0 Procedure'. 1 paragraph, 1 table."
+
+
+def test_section_deleted_reason_includes_content_summary():
+    old_sections = [
+        Section(heading="7.0 References", paragraphs=[
+            Paragraph(text="Equipment Manual EM-004."),
+            Paragraph(text="Quality Manual QM-001."),
+        ]),
+    ]
+
+    changes = detect_section_deleted([0], old_sections)
+
+    assert changes[0].reason == "Section deleted: '7.0 References'. 2 paragraphs."
+
+
+def test_heading_only_section_added_reason_says_no_content():
+    changes = detect_section_added([0], [Section(heading="9.0 Training Log", paragraphs=[])])
+    assert changes[0].reason == "New section added: '9.0 Training Log'. No content."
+
+
+def test_heading_only_section_deleted_reason_says_no_content():
+    changes = detect_section_deleted([0], [Section(heading="7.0 References", paragraphs=[])])
+    assert changes[0].reason == "Section deleted: '7.0 References'. No content."
+
+
+def test_section_added_summary_counts_only_remaining_paragraphs():
+    # Content that merely relocated into this section is excluded from the row's
+    # new_text and reported separately as a move, so the summary must exclude it
+    # too - otherwise the count would contradict the text displayed beside it.
+    relocated = Paragraph(text="this moved in from another section")
+    genuinely_new_one = Paragraph(text="genuinely new one")
+    genuinely_new_two = Paragraph(text="genuinely new two")
+    new_sections = [
+        Section(heading="5.0 Sampling", paragraphs=[genuinely_new_one, relocated, genuinely_new_two]),
+    ]
+
+    changes = detect_section_added(
+        [0], new_sections, excluded_paragraph_ids={id(relocated)}
+    )
+
+    assert changes[0].reason == "New section added: '5.0 Sampling'. 2 paragraphs."
+    assert changes[0].new_text == "5.0 Sampling\ngenuinely new one\ngenuinely new two"

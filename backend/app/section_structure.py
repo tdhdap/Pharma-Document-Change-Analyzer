@@ -2,7 +2,7 @@ import re
 import uuid
 
 from app import risk_rules
-from app.models import Change, Section, SectionMatch
+from app.models import Change, Paragraph, Section, SectionMatch
 
 _HEADING_NUMBER_PATTERN = re.compile(r"^(?P<num>\d+(?:\.\d+)*)\s+(?P<rest>.*)$")
 
@@ -126,6 +126,29 @@ def detect_section_reordering(
     return changes
 
 
+def _summarize_section_content(paragraphs: list[Paragraph]) -> str:
+    # Table content is stored one Paragraph per CELL, all cells of one table
+    # sharing a table_id - so counting raw paragraphs would report a 4x3 table
+    # as "12 paragraphs". Count distinct tables instead. Guarding on
+    # table_position is defensive: extraction always sets it alongside
+    # from_table, but a table paragraph without one should be skipped in the
+    # tally rather than raising mid-comparison.
+    body_count = sum(1 for p in paragraphs if not p.from_table)
+    table_ids = {
+        p.table_position.table_id
+        for p in paragraphs
+        if p.from_table and p.table_position is not None
+    }
+    parts = []
+    if body_count:
+        parts.append(f"{body_count} paragraph" + ("" if body_count == 1 else "s"))
+    if table_ids:
+        parts.append(f"{len(table_ids)} table" + ("" if len(table_ids) == 1 else "s"))
+    if not parts:
+        return "No content."
+    return ", ".join(parts) + "."
+
+
 def detect_section_added(
     inserted_indices: list[int],
     new_sections: list[Section],
@@ -146,7 +169,11 @@ def detect_section_added(
             change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
             old_text="", new_text=new_text, old_page=None, new_page=new_page,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
-            reason=f"New section added: '{section.heading}'.", source=source,
+            reason=(
+                f"New section added: '{section.heading}'. "
+                f"{_summarize_section_content(remaining_paragraphs)}"
+            ),
+            source=source,
         ))
     return changes
 
@@ -171,7 +198,11 @@ def detect_section_deleted(
             change_id=str(uuid.uuid4()), section=section.heading, change_type=change_type,
             old_text=old_text, new_text="", old_page=old_page, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
-            reason=f"Section deleted: '{section.heading}'.", source=source,
+            reason=(
+                f"Section deleted: '{section.heading}'. "
+                f"{_summarize_section_content(remaining_paragraphs)}"
+            ),
+            source=source,
         ))
     return changes
 

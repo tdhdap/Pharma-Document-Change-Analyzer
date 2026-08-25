@@ -125,6 +125,55 @@ def test_categorize_change_defaults_source_to_body_when_absent():
     assert categorize_change(change) == "Body"
 
 
+def test_section_added_with_table_content_is_not_routed_to_tables():
+    # These rows carry source="Table" when the section contained cells, but they
+    # have no table coordinates - routing them to Tables makes table_group_key
+    # dereference None and the page raises.
+    change = {
+        "section": "4.0 Procedure",
+        "source": "Table",
+        "change_type": "section_added",
+        "old_table_position": None,
+        "new_table_position": None,
+    }
+    assert categorize_change(change) == "Body"
+
+
+def test_section_deleted_with_table_content_is_not_routed_to_tables():
+    change = {
+        "section": "4.0 Procedure",
+        "source": "Table",
+        "change_type": "section_deleted",
+        "old_table_position": None,
+        "new_table_position": None,
+    }
+    assert categorize_change(change) == "Body"
+
+
+def test_whole_section_row_in_a_header_still_routes_to_headers():
+    change = {
+        "section": "Page Header",
+        "source": "Table",
+        "change_type": "section_added",
+        "old_table_position": None,
+        "new_table_position": None,
+    }
+    assert categorize_change(change) == "Headers"
+
+
+def test_real_table_cell_change_still_routes_to_tables():
+    # Guard that the fix did not over-broaden: genuine cell-level changes must
+    # still reach the Tables group.
+    change = {
+        "section": "4.0 Procedure",
+        "source": "Table",
+        "change_type": "numeric_change",
+        "old_table_position": {"table_id": 0, "row": 1, "col": 2},
+        "new_table_position": {"table_id": 0, "row": 1, "col": 2},
+    }
+    assert categorize_change(change) == "Tables"
+
+
 def test_group_changes_for_display_all_four_keys_always_present():
     result = group_changes_for_display([])
     assert set(result.keys()) == {"Headers", "Footers", "Body", "Tables"}

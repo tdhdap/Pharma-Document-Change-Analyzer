@@ -126,7 +126,9 @@ def detect_section_reordering(
     return changes
 
 
-def _summarize_section_content(paragraphs: list[Paragraph]) -> str:
+def _summarize_section_content(
+    paragraphs: list[Paragraph], section_paragraphs: list[Paragraph] | None = None
+) -> str:
     # Table content is stored one Paragraph per CELL, all cells of one table
     # sharing a table_id - so counting raw paragraphs would report a 4x3 table
     # as "12 paragraphs". Count distinct tables instead. Guarding on
@@ -144,9 +146,15 @@ def _summarize_section_content(paragraphs: list[Paragraph]) -> str:
         parts.append(f"{body_count} paragraph" + ("" if body_count == 1 else "s"))
     if table_ids:
         parts.append(f"{len(table_ids)} table" + ("" if len(table_ids) == 1 else "s"))
-    if not parts:
-        return "No content."
-    return ", ".join(parts) + "."
+    if parts:
+        return ", ".join(parts) + "."
+    # An empty remaining list means one of two very different things. If the
+    # section held paragraphs and every one of them was excluded, they all
+    # moved and are reported on their own move rows - saying "No content."
+    # there would actively mislead a reviewer into skipping a High-risk row.
+    if section_paragraphs:
+        return "All content moved; see the related move entries."
+    return "No content."
 
 
 def detect_section_added(
@@ -171,7 +179,7 @@ def detect_section_added(
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=(
                 f"New section added: '{section.heading}'. "
-                f"{_summarize_section_content(remaining_paragraphs)}"
+                f"{_summarize_section_content(remaining_paragraphs, section.paragraphs)}"
             ),
             source=source,
         ))
@@ -200,7 +208,7 @@ def detect_section_deleted(
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=(
                 f"Section deleted: '{section.heading}'. "
-                f"{_summarize_section_content(remaining_paragraphs)}"
+                f"{_summarize_section_content(remaining_paragraphs, section.paragraphs)}"
             ),
             source=source,
         ))

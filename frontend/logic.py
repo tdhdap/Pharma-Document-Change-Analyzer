@@ -36,8 +36,18 @@ def format_table_cell(old_position: dict | None, new_position: dict | None) -> s
     return f"Table {position['table_id']}, Row {position['row']}, Col {position['col']}"
 
 
+_WHOLE_SECTION_CHANGE_TYPES = {"section_added", "section_deleted"}
+
+
 def categorize_change(change: dict) -> str:
-    if change.get("source", "Body") == "Table":
+    # A whole-section row is not a cell-level row: it has no table coordinates
+    # to render in the Row/Col columns, and routing it to Tables makes
+    # table_group_key dereference a None position. Categorize it by its
+    # section name like any other section-level change.
+    if (
+        change.get("source", "Body") == "Table"
+        and change.get("change_type") not in _WHOLE_SECTION_CHANGE_TYPES
+    ):
         return "Tables"
     section = change["section"]
     if section.startswith("Page Header"):

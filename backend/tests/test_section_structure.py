@@ -604,3 +604,41 @@ def test_section_added_summary_counts_only_remaining_paragraphs():
 
     assert changes[0].reason == "New section added: '5.0 Sampling'. 2 paragraphs."
     assert changes[0].new_text == "5.0 Sampling\ngenuinely new one\ngenuinely new two"
+
+
+def test_summary_distinguishes_relocated_content_from_a_genuinely_empty_section():
+    # An empty remaining list means two different things, and only one of them
+    # is "this section is empty". Saying "No content." about a section whose
+    # every paragraph moved in from elsewhere would tell a reviewer to skip a
+    # High-risk row that does contain a requirement.
+    moved_away = Paragraph(text="this paragraph moved and is reported separately")
+
+    assert _summarize_section_content([], []) == "No content."
+    assert (
+        _summarize_section_content([], [moved_away])
+        == "All content moved; see the related move entries."
+    )
+
+
+def test_section_added_whose_content_all_relocated_does_not_claim_no_content():
+    relocated = Paragraph(text="Material shall not be used beyond 24 months.")
+    new_sections = [Section(heading="9.0 Storage and Shelf Life", paragraphs=[relocated])]
+
+    changes = detect_section_added([0], new_sections, excluded_paragraph_ids={id(relocated)})
+
+    assert changes[0].reason == (
+        "New section added: '9.0 Storage and Shelf Life'. "
+        "All content moved; see the related move entries."
+    )
+
+
+def test_section_deleted_whose_content_all_relocated_does_not_claim_no_content():
+    relocated = Paragraph(text="Material shall not be used beyond 24 months.")
+    old_sections = [Section(heading="2.0 Materials", paragraphs=[relocated])]
+
+    changes = detect_section_deleted([0], old_sections, excluded_paragraph_ids={id(relocated)})
+
+    assert changes[0].reason == (
+        "Section deleted: '2.0 Materials'. "
+        "All content moved; see the related move entries."
+    )

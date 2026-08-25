@@ -18,7 +18,11 @@ def detect_section_renumbering(
     matches: list[SectionMatch],
     old_sections: list[Section],
     new_sections: list[Section],
+    inserted_indices: list[int] | None = None,
+    deleted_indices: list[int] | None = None,
 ) -> list[Change]:
+    inserted_indices = inserted_indices or []
+    deleted_indices = deleted_indices or []
     changes: list[Change] = []
     for m in matches:
         old_heading = old_sections[m.old_index].heading
@@ -32,11 +36,39 @@ def detect_section_renumbering(
         if old_num == new_num:
             continue
         change_type = "section_renumbered"
+        reason = f"Section renumbered from '{old_num}' to '{new_num}'."
+        # A number that moved by exactly the count of numbered sections added
+        # above it (minus those removed) was not renumbered by anyone - it was
+        # pushed. Only numbered sections count: the pseudo-sections this tool
+        # generates (Page Header, Text Box N, Footnote N) carry no number.
+        # Anything the arithmetic does not explain exactly stays deliberate,
+        # so this over-reports rather than hides.
+        inserted_above = sum(
+            1 for i in inserted_indices
+            if i < m.new_index and _split_heading_number(new_sections[i].heading) is not None
+        )
+        deleted_above = sum(
+            1 for i in deleted_indices
+            if i < m.old_index and _split_heading_number(old_sections[i].heading) is not None
+        )
+        expected_shift = inserted_above - deleted_above
+        try:
+            actual_shift = int(new_num.split(".")[0]) - int(old_num.split(".")[0])
+        except ValueError:
+            actual_shift = None
+        if expected_shift != 0 and actual_shift == expected_shift:
+            change_type = "section_renumbered_cascade"
+            count = abs(expected_shift)
+            verb = "added" if expected_shift > 0 else "removed"
+            reason = (
+                f"Section renumbered from '{old_num}' to '{new_num}' as a side effect of "
+                f"{count} section{'' if count == 1 else 's'} {verb} above it; wording unchanged."
+            )
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
             confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
-            reason=f"Section renumbered from '{old_num}' to '{new_num}'.", source="Body",
+            reason=reason, source="Body",
         ))
     return changes
 

@@ -642,3 +642,229 @@ def test_section_deleted_whose_content_all_relocated_does_not_claim_no_content()
         "Section deleted: '2.0 Materials'. "
         "All content moved; see the related move entries."
     )
+
+
+def test_renumbering_caused_by_an_insertion_above_is_cascading():
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Equipment", paragraphs=[]),
+        Section(heading="3.0 Records", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Safety", paragraphs=[]),
+        Section(heading="3.0 Equipment", paragraphs=[]),
+        Section(heading="4.0 Records", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=1, new_index=2, score=1.0),
+        SectionMatch(old_index=2, new_index=3, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[1], deleted_indices=[]
+    )
+
+    assert [c.change_type for c in changes] == [
+        "section_renumbered_cascade", "section_renumbered_cascade",
+    ]
+    assert changes[0].reason == (
+        "Section renumbered from '2.0' to '3.0' as a side effect of "
+        "1 section added above it; wording unchanged."
+    )
+    assert changes[0].ai_risk_level == "Informational"
+
+
+def test_renumbering_caused_by_a_deletion_above_is_cascading():
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Scope", paragraphs=[]),
+        Section(heading="3.0 Equipment", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Equipment", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=2, new_index=1, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[], deleted_indices=[1]
+    )
+
+    assert [c.change_type for c in changes] == ["section_renumbered_cascade"]
+    assert changes[0].reason == (
+        "Section renumbered from '3.0' to '2.0' as a side effect of "
+        "1 section removed above it; wording unchanged."
+    )
+
+
+def test_two_insertions_above_produce_a_plural_reason():
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Records", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Safety", paragraphs=[]),
+        Section(heading="3.0 Training", paragraphs=[]),
+        Section(heading="4.0 Records", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=1, new_index=3, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[1, 2], deleted_indices=[]
+    )
+
+    assert changes[0].change_type == "section_renumbered_cascade"
+    assert changes[0].reason == (
+        "Section renumbered from '2.0' to '4.0' as a side effect of "
+        "2 sections added above it; wording unchanged."
+    )
+
+
+def test_swap_with_no_insertion_or_deletion_stays_deliberate():
+    # Two sections trading places renumbers both, but nothing was added or
+    # removed, so expected_shift is 0 and neither qualifies as cascading.
+    # detect_section_reordering reports the swap itself separately.
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Equipment", paragraphs=[]),
+        Section(heading="3.0 Records", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Records", paragraphs=[]),
+        Section(heading="3.0 Equipment", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=1, new_index=2, score=1.0),
+        SectionMatch(old_index=2, new_index=1, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[], deleted_indices=[]
+    )
+
+    assert [c.change_type for c in changes] == [
+        "section_renumbered", "section_renumbered",
+    ]
+
+
+def test_deliberate_renumber_alongside_an_insertion_stays_deliberate():
+    # A section was inserted above (expected_shift = 1), but this section's
+    # number jumped by 2 - the arithmetic does not explain it, so it is
+    # deliberate.
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Records", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Safety", paragraphs=[]),
+        Section(heading="4.0 Records", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=1, new_index=2, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[1], deleted_indices=[]
+    )
+
+    assert [c.change_type for c in changes] == ["section_renumbered"]
+
+
+def test_gapped_numbering_still_classifies_as_cascading():
+    # The document numbers 1.0, 2.0, 4.0 - there is no 3.0. A position-based
+    # rule would misjudge this; the arithmetic compares against what actually
+    # changed structurally, so it holds.
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Scope", paragraphs=[]),
+        Section(heading="4.0 Equipment", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Scope", paragraphs=[]),
+        Section(heading="3.0 Safety", paragraphs=[]),
+        Section(heading="5.0 Equipment", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=0, score=1.0),
+        SectionMatch(old_index=1, new_index=1, score=1.0),
+        SectionMatch(old_index=2, new_index=3, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[2], deleted_indices=[]
+    )
+
+    assert [c.change_type for c in changes] == ["section_renumbered_cascade"]
+
+
+def test_sub_numbering_shift_stays_deliberate():
+    # Only the first dot-separated component participates in the comparison,
+    # so a shift at a deeper level is not explained by the arithmetic and
+    # stays deliberate - the conservative direction.
+    old_sections = [
+        Section(heading="3.1 Equipment", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="3.0 Safety", paragraphs=[]),
+        Section(heading="3.2 Equipment", paragraphs=[]),
+    ]
+    matches = [SectionMatch(old_index=0, new_index=1, score=1.0)]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[0], deleted_indices=[]
+    )
+
+    assert [c.change_type for c in changes] == ["section_renumbered"]
+
+
+def test_unnumbered_pseudo_sections_do_not_count_toward_the_shift():
+    # "Page Header" is a pseudo-section this tool generates; it carries no
+    # number, so inserting one above a numbered section must not make a
+    # genuine renumbering look like a cascade.
+    old_sections = [
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="2.0 Equipment", paragraphs=[]),
+    ]
+    new_sections = [
+        Section(heading="Page Header", paragraphs=[]),
+        Section(heading="1.0 Purpose", paragraphs=[]),
+        Section(heading="3.0 Equipment", paragraphs=[]),
+    ]
+    matches = [
+        SectionMatch(old_index=0, new_index=1, score=1.0),
+        SectionMatch(old_index=1, new_index=2, score=1.0),
+    ]
+
+    changes = detect_section_renumbering(
+        matches, old_sections, new_sections, inserted_indices=[0], deleted_indices=[]
+    )
+
+    # The unnumbered insertion contributes 0, so the 2.0 -> 3.0 shift of 1 is
+    # unexplained and stays deliberate.
+    assert [c.change_type for c in changes] == ["section_renumbered"]
+
+
+def test_omitting_the_new_arguments_reports_everything_as_deliberate():
+    # Backwards compatibility: three-argument callers see unchanged behavior.
+    old_sections = [Section(heading="2.0 Equipment", paragraphs=[])]
+    new_sections = [Section(heading="3.0 Equipment", paragraphs=[])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=1.0)]
+
+    changes = detect_section_renumbering(matches, old_sections, new_sections)
+
+    assert [c.change_type for c in changes] == ["section_renumbered"]
+    assert changes[0].reason == "Section renumbered from '2.0' to '3.0'."

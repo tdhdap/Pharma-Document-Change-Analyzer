@@ -49,7 +49,8 @@ def compare_documents(
 
     changes: list[Change] = []
     changes.extend(section_structure.detect_section_renumbering(
-        match_result.matches, old_sections, new_sections
+        match_result.matches, old_sections, new_sections,
+        match_result.inserted_indices, match_result.deleted_indices,
     ))
     changes.extend(section_structure.detect_section_heading_changed(
         match_result.matches, old_sections, new_sections

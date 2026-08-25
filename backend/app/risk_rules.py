@@ -9,6 +9,7 @@ RISK_TABLE = {
     "clarification_no_meaning_change": "Low",
     "formatting_only": "Informational",
     "section_renumbered": "Informational",
+    "section_renumbered_cascade": "Informational",
     "section_reordered": "Informational",
     "section_added": "High",
     "section_deleted": "High",

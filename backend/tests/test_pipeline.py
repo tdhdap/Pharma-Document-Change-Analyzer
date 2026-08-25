@@ -913,3 +913,39 @@ def test_real_document_move_with_edit_reports_both_move_and_content_change(monke
     ]
     assert len(content_changes) == 1
     assert content_changes[0].section == "10.0 Long-Term Sample Retention"
+
+
+def test_pipeline_reports_insertion_driven_renumbering_as_cascading(monkeypatch):
+    # One insertion renumbers everything below it. Those rows are mechanical
+    # consequences of a single edit and must be distinguishable from a
+    # deliberate renumbering so a reviewer can filter them out.
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected for heading-only changes")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines the tablet compression process."),
+        Paragraph(text="2.0 Equipment"),
+        Paragraph(text="A rotary tablet press with standard tooling is used."),
+        Paragraph(text="3.0 Records"),
+        Paragraph(text="Batch records are retained for six years."),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Purpose"),
+        Paragraph(text="This SOP defines the tablet compression process."),
+        Paragraph(text="2.0 Safety"),
+        Paragraph(text="Operators shall wear eye protection at all times."),
+        Paragraph(text="3.0 Equipment"),
+        Paragraph(text="A rotary tablet press with standard tooling is used."),
+        Paragraph(text="4.0 Records"),
+        Paragraph(text="Batch records are retained for six years."),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert change_types.count("section_renumbered_cascade") == 2
+    assert "section_renumbered" not in change_types
+    assert "section_added" in change_types

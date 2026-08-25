@@ -42,3 +42,10 @@ def test_section_deleted_is_high_risk():
 
 def test_section_heading_changed_is_medium_risk():
     assert assign_risk("section_heading_changed") == "Medium"
+
+
+def test_section_renumbered_cascade_is_informational_risk():
+    # Must match section_renumbered rather than falling through to the
+    # DEFAULT_RISK of "Medium", which would silently promote a cascade above
+    # the renumbering it replaces.
+    assert assign_risk("section_renumbered_cascade") == "Informational"

@@ -11,6 +11,13 @@ from app.extraction import extract_text
 from app.models import Paragraph, LLMClassification, TableCoordinate
 
 
+_TEST_DOCS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "test-documents",
+    "docx",
+)
+
+
 def test_pipeline_reproduces_the_outline_example(monkeypatch):
     old_paragraphs = [
         Paragraph(text="Assay acceptance criterion: 95.0% to 105.0%."),
@@ -853,3 +860,56 @@ def test_moved_paragraph_tells_the_ai_which_change_types_regex_already_caught(mo
     change_types = [c.change_type for c in result.changes]
     assert "numeric_change" in change_types
     assert "role_responsibility_change" in change_types
+
+
+def test_real_document_move_with_edit_reports_both_move_and_content_change(monkeypatch):
+    # Real-document regression guard for this branch's whole reason to exist.
+    # Every other test for this fix uses hand-built Paragraph objects, which skip
+    # extraction, sectioning, and real section matching - so nothing else would
+    # notice if a drift in those made this paragraph stop registering as a move
+    # and the content change went silently missing again.
+    #
+    # In C1, "The stability chamber log..." moves from 8.0 Final Disposition into
+    # the brand-new section 10.0 Long-Term Sample Retention AND is reworded.
+    def fake_classify(unresolved):
+        return [
+            LLMClassification(
+                change_id=item["change_id"],
+                change_type="clarification_no_meaning_change",
+                reason="Wording expanded for clarity.",
+                confidence=0.9,
+            )
+            for item in unresolved
+        ]
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fake_classify)
+
+    old_paragraphs = extract_text(os.path.join(_TEST_DOCS_DIR, "C1_v1.docx"), "docx")
+    new_paragraphs = extract_text(os.path.join(_TEST_DOCS_DIR, "C1_v2.docx"), "docx")
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "C1_v1.docx", "C1_v2.docx")
+
+    old_text = "The stability chamber log shall be filed with the batch record."
+    new_text = (
+        "The stability chamber log shall be filed together with the batch record "
+        "for long-term retention."
+    )
+
+    moves = [
+        c for c in result.changes
+        if c.change_type == "moved_paragraph" and c.old_text == old_text
+    ]
+    assert len(moves) == 1
+    assert moves[0].section == "8.0 Final Disposition -> 10.0 Long-Term Sample Retention"
+    assert moves[0].new_text == new_text
+
+    # The edit that the move used to hide: reported separately, filed under the
+    # section the paragraph now lives in.
+    content_changes = [
+        c for c in result.changes
+        if c.change_type != "moved_paragraph"
+        and c.old_text == old_text
+        and c.new_text == new_text
+    ]
+    assert len(content_changes) == 1
+    assert content_changes[0].section == "10.0 Long-Term Sample Retention"

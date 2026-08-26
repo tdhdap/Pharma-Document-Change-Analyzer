@@ -200,3 +200,24 @@ def diff_columns(
         ))
 
     return changes, excluded
+
+
+def diff_merges(old_grid: TableGrid, new_grid: TableGrid) -> list[Change]:
+    # Only positions present in both grids can be compared. A position that
+    # exists in one and not the other is a merge boundary shifting, which the
+    # anchor's own span change already reports - counting it again here would
+    # double-report one merge.
+    changes: list[Change] = []
+    for position in sorted(set(old_grid.cells) & set(new_grid.cells)):
+        row, col = position
+        old_span = old_grid.span_at(row, col)
+        new_span = new_grid.span_at(row, col)
+        if old_span == new_span:
+            continue
+        changes.append(_line_change(
+            "table_cell_merge_changed",
+            old_grid.text_at(row, col), new_grid.text_at(row, col),
+            f"Table cell at row {row + 1}, column {col + 1} changed from spanning "
+            f"{old_span[0]}x{old_span[1]} to {new_span[0]}x{new_span[1]} cells.",
+        ))
+    return changes

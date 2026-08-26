@@ -61,3 +61,7 @@ def test_table_column_change_types_have_explicit_risk():
     assert assign_risk("table_column_added") == "Medium"
     assert assign_risk("table_column_deleted") == "Medium"
     assert assign_risk("table_column_moved") == "Informational"
+
+
+def test_table_cell_merge_changed_is_informational_risk():
+    assert assign_risk("table_cell_merge_changed") == "Informational"

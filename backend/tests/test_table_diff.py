@@ -1,5 +1,5 @@
 from app.models import Paragraph, TableCoordinate
-from app.table_diff import build_grids, match_tables, _match_lines, diff_rows, diff_columns
+from app.table_diff import build_grids, match_tables, _match_lines, diff_rows, diff_columns, diff_merges
 
 
 def cell(table_id, row, col, text, row_span=1, col_span=1):
@@ -219,3 +219,37 @@ def test_column_moved_is_reported_and_its_cells_are_not_excluded():
     assert len(moved) == 1
     assert moved[0].ai_risk_level == "Informational"
     assert excluded == set()
+
+
+def test_newly_merged_cell_is_reported():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Limit"), cell(0, 0, 1, "Limit")],
+        [cell(0, 0, 0, "Limit", col_span=2)],
+    )
+
+    changes = diff_merges(old_grid, new_grid)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "table_cell_merge_changed"
+    assert changes[0].ai_risk_level == "Informational"
+
+
+def test_unmerged_cell_is_reported():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Limit", row_span=2)],
+        [cell(0, 0, 0, "Limit"), cell(0, 1, 0, "Limit")],
+    )
+
+    changes = diff_merges(old_grid, new_grid)
+
+    assert len(changes) == 1
+    assert changes[0].change_type == "table_cell_merge_changed"
+
+
+def test_unchanged_spans_report_nothing():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Limit", col_span=2), cell(0, 1, 0, "Assay")],
+        [cell(0, 0, 0, "Limit", col_span=2), cell(0, 1, 0, "Assay")],
+    )
+
+    assert diff_merges(old_grid, new_grid) == []

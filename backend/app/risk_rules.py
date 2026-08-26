@@ -20,6 +20,7 @@ RISK_TABLE = {
     "table_column_added": "Medium",
     "table_column_deleted": "Medium",
     "table_column_moved": "Informational",
+    "table_cell_merge_changed": "Informational",
 }
 
 DEFAULT_RISK = "Medium"

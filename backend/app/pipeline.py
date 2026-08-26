@@ -1,7 +1,7 @@
 import uuid
 
 from app import sectioning, section_matching, section_structure, paragraph_diff, move_reconciliation
-from app import regex_detectors, llm_classifier, risk_rules
+from app import regex_detectors, llm_classifier, risk_rules, table_diff
 from app.models import Paragraph, Change, ComparisonResult, build_summary
 
 Orphan = tuple[Paragraph, str]
@@ -139,8 +139,13 @@ def compare_documents(
         changes.extend(moved_content_changes)
         already_detected_by_id.update(moved_already_detected)
 
+    table_structure_changes, table_structure_excluded = table_diff.detect_table_structure_changes(
+        old_paragraphs, new_paragraphs
+    )
+    changes.extend(table_structure_changes)
+
     for p, section in remaining_deletes:
-        if id(p) in whole_deleted_paragraph_ids:
+        if id(p) in whole_deleted_paragraph_ids or id(p) in table_structure_excluded:
             continue
         source = "Table" if p.from_table else "Body"
         if source == "Table":
@@ -158,7 +163,7 @@ def compare_documents(
         ))
 
     for p, section in remaining_inserts:
-        if id(p) in whole_inserted_paragraph_ids:
+        if id(p) in whole_inserted_paragraph_ids or id(p) in table_structure_excluded:
             continue
         source = "Table" if p.from_table else "Body"
         if source == "Table":

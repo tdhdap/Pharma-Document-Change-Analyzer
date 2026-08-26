@@ -949,3 +949,36 @@ def test_pipeline_reports_insertion_driven_renumbering_as_cascading(monkeypatch)
     assert change_types.count("section_renumbered_cascade") == 2
     assert "section_renumbered" not in change_types
     assert "section_added" in change_types
+
+
+def test_pipeline_reports_an_added_table_row_once_instead_of_per_cell(monkeypatch):
+    # The whole point of the feature: one structural edit, one row in the report.
+    def fail_if_called(unresolved):
+        raise AssertionError("no AI call expected")
+
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", fail_if_called)
+
+    position = lambda r, c: TableCoordinate(table_id=0, row=r, col=c)
+    old_paragraphs = [
+        Paragraph(text="4.0 Procedure"),
+        Paragraph(text="Parameter", from_table=True, table_position=position(0, 0)),
+        Paragraph(text="Target", from_table=True, table_position=position(0, 1)),
+        Paragraph(text="Compression Force", from_table=True, table_position=position(1, 0)),
+        Paragraph(text="15 kN", from_table=True, table_position=position(1, 1)),
+    ]
+    new_paragraphs = [
+        Paragraph(text="4.0 Procedure"),
+        Paragraph(text="Parameter", from_table=True, table_position=position(0, 0)),
+        Paragraph(text="Target", from_table=True, table_position=position(0, 1)),
+        Paragraph(text="Compression Force", from_table=True, table_position=position(1, 0)),
+        Paragraph(text="15 kN", from_table=True, table_position=position(1, 1)),
+        Paragraph(text="Hardness", from_table=True, table_position=position(2, 0)),
+        Paragraph(text="8 kg", from_table=True, table_position=position(2, 1)),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "old.txt", "new.txt")
+
+    change_types = [c.change_type for c in result.changes]
+    assert change_types.count("table_row_added") == 1
+    # The two cells of the added row must not also be reported individually.
+    assert "added_table_content" not in change_types

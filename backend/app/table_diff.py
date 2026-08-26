@@ -221,3 +221,19 @@ def diff_merges(old_grid: TableGrid, new_grid: TableGrid) -> list[Change]:
             f"{old_span[0]}x{old_span[1]} to {new_span[0]}x{new_span[1]} cells.",
         ))
     return changes
+
+
+def detect_table_structure_changes(
+    old_paragraphs: list[Paragraph], new_paragraphs: list[Paragraph]
+) -> tuple[list[Change], set[int]]:
+    changes: list[Change] = []
+    excluded: set[int] = set()
+    for old_grid, new_grid in match_tables(build_grids(old_paragraphs), build_grids(new_paragraphs)):
+        row_changes, row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+        column_changes, column_excluded = diff_columns(old_grid, new_grid, row_alignment)
+        changes.extend(row_changes)
+        changes.extend(column_changes)
+        changes.extend(diff_merges(old_grid, new_grid))
+        excluded.update(row_excluded)
+        excluded.update(column_excluded)
+    return changes, excluded

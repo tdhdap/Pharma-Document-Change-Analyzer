@@ -1,5 +1,8 @@
 from app.models import Paragraph, TableCoordinate
-from app.table_diff import build_grids, match_tables, _match_lines, diff_rows, diff_columns, diff_merges
+from app.table_diff import (
+    build_grids, match_tables, _match_lines, diff_rows, diff_columns, diff_merges,
+    detect_table_structure_changes,
+)
 
 
 def cell(table_id, row, col, text, row_span=1, col_span=1):
@@ -253,3 +256,31 @@ def test_unchanged_spans_report_nothing():
     )
 
     assert diff_merges(old_grid, new_grid) == []
+
+
+def test_entry_point_matches_tables_by_content_despite_shifted_ids():
+    # The Assay table is table_id 0 in old and table_id 1 in new, because an
+    # unrelated table was inserted above it. Its added row must still be found.
+    old_paragraphs = [
+        cell(0, 0, 0, "Assay"), cell(0, 0, 1, "95 percent"),
+    ]
+    new_paragraphs = [
+        cell(0, 0, 0, "Unrelated"), cell(0, 0, 1, "Entirely different table"),
+        cell(1, 0, 0, "Assay"), cell(1, 0, 1, "95 percent"),
+        cell(1, 1, 0, "Hardness"), cell(1, 1, 1, "8 kg"),
+    ]
+
+    changes, excluded = detect_table_structure_changes(old_paragraphs, new_paragraphs)
+
+    added = [c for c in changes if c.change_type == "table_row_added"]
+    assert len(added) == 1
+    assert added[0].new_text == "Hardness | 8 kg"
+
+
+def test_entry_point_returns_nothing_when_there_are_no_tables():
+    changes, excluded = detect_table_structure_changes(
+        [Paragraph(text="body text")], [Paragraph(text="body text")]
+    )
+
+    assert changes == []
+    assert excluded == set()

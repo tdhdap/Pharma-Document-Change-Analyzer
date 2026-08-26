@@ -104,6 +104,10 @@ def table_group_key(change: dict) -> int:
     new_position = change.get("new_table_position")
     old_position = change.get("old_table_position")
     position = new_position if new_position is not None else old_position
+    # A Table row with no coordinates at all must not take the page down. Any
+    # such row groups under its own heading rather than crashing the renderer.
+    if position is None:
+        return -1
     return position["table_id"]
 
 

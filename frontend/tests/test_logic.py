@@ -339,3 +339,13 @@ def test_table_group_key_uses_new_position_when_old_is_absent():
         "new_table_position": {"table_id": 3, "row": 0, "col": 0},
     }
     assert table_group_key(change) == 3
+
+
+def test_table_group_key_survives_a_missing_position():
+    # A Table row with no coordinates at all used to take the whole page down
+    # with TypeError: 'NoneType' object is not subscriptable.
+    change = {
+        "section": "Table 1", "source": "Table", "change_type": "table_row_added",
+        "old_table_position": None, "new_table_position": None,
+    }
+    assert table_group_key(change) == -1

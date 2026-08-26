@@ -205,3 +205,61 @@ def test_page_headers_category_distinguishes_multiple_variants():
     assert not at.exception
     headers_table = next(t.value for t in at.table if "Section" in t.value.columns)
     assert list(headers_table["Section"]) == ["Page Header", "Page Header (First Page)"]
+
+
+def test_page_renders_table_structure_changes_without_crashing():
+    # Reproduces the final-review Critical: a table structure change carried
+    # source="Table" with no coordinates, and the Tables renderer dereferenced
+    # the missing position.
+    changes = [
+        {
+            "change_id": "t1", "section": "Table 1", "source": "Table",
+            "change_type": "table_row_added",
+            "old_text": "", "new_text": "Hardness | 8 kg | 7.9 kg",
+            "ai_risk_level": "Medium", "reviewer_risk_level": None,
+            "reason": "Table row 4 added.",
+            "old_table_position": None,
+            "new_table_position": {"table_id": 0, "row": 3, "col": 0},
+        },
+    ]
+    at = _run_page_with(changes)
+    assert not at.exception
+
+
+def test_page_survives_a_table_row_with_no_coordinates_at_all():
+    # The defensive half: whatever produces it, a Table row with both positions
+    # missing must group under its own heading rather than crash the page.
+    changes = [
+        {
+            "change_id": "t1", "section": "Table 1", "source": "Table",
+            "change_type": "table_column_deleted",
+            "old_text": "Method | HPLC", "new_text": "",
+            "ai_risk_level": "Medium", "reviewer_risk_level": None,
+            "reason": "Table column 3 removed.",
+            "old_table_position": None,
+            "new_table_position": None,
+        },
+    ]
+    at = _run_page_with(changes)
+    assert not at.exception
+
+
+def test_page_has_no_blank_section_filter_entry_for_structural_rows():
+    # Structural rows carried section="", which put an empty entry in the
+    # section dropdown and told the reviewer nothing about which table changed.
+    changes = [
+        {
+            "change_id": "t1", "section": "Table 1", "source": "Table",
+            "change_type": "table_row_added",
+            "old_text": "", "new_text": "Hardness | 8 kg",
+            "ai_risk_level": "Medium", "reviewer_risk_level": None,
+            "reason": "Table row 2 added.",
+            "old_table_position": None,
+            "new_table_position": {"table_id": 0, "row": 1, "col": 0},
+        },
+    ]
+    at = _run_page_with(changes)
+    assert not at.exception
+    section_options = at.selectbox[1].options  # "Filter by section" is the second selectbox
+    assert "" not in section_options
+    assert "Table 1" in section_options

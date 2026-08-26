@@ -98,6 +98,14 @@ def _grids(old_cells, new_cells):
     return build_grids(old_cells)[0], build_grids(new_cells)[0]
 
 
+def _merges(old_grid, new_grid):
+    # diff_merges compares aligned positions, so it needs the alignments the
+    # other two detectors compute. Mirrors what detect_table_structure_changes does.
+    _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+    _col_changes, _col_excluded, col_alignment = diff_columns(old_grid, new_grid, row_alignment)
+    return diff_merges(old_grid, new_grid, row_alignment, col_alignment)
+
+
 def test_row_added_is_reported_once_with_the_whole_row():
     old_grid, new_grid = _grids(
         [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
@@ -181,7 +189,7 @@ def test_column_added_is_reported_once_with_the_whole_column():
     )
 
     _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
-    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+    changes, excluded, _col_alignment = diff_columns(old_grid, new_grid, row_alignment)
 
     added = [c for c in changes if c.change_type == "table_column_added"]
     assert len(added) == 1
@@ -199,7 +207,7 @@ def test_column_deleted_is_reported_once_and_its_cells_excluded():
     )
 
     _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
-    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+    changes, excluded, _col_alignment = diff_columns(old_grid, new_grid, row_alignment)
 
     deleted = [c for c in changes if c.change_type == "table_column_deleted"]
     assert len(deleted) == 1
@@ -216,7 +224,7 @@ def test_column_moved_is_reported_and_its_cells_are_not_excluded():
     )
 
     _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
-    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+    changes, excluded, _col_alignment = diff_columns(old_grid, new_grid, row_alignment)
 
     moved = [c for c in changes if c.change_type == "table_column_moved"]
     assert len(moved) == 1
@@ -230,7 +238,7 @@ def test_newly_merged_cell_is_reported():
         [cell(0, 0, 0, "Limit", col_span=2)],
     )
 
-    changes = diff_merges(old_grid, new_grid)
+    changes = _merges(old_grid, new_grid)
 
     assert len(changes) == 1
     assert changes[0].change_type == "table_cell_merge_changed"
@@ -243,7 +251,7 @@ def test_unmerged_cell_is_reported():
         [cell(0, 0, 0, "Limit"), cell(0, 1, 0, "Limit")],
     )
 
-    changes = diff_merges(old_grid, new_grid)
+    changes = _merges(old_grid, new_grid)
 
     assert len(changes) == 1
     assert changes[0].change_type == "table_cell_merge_changed"
@@ -255,7 +263,7 @@ def test_unchanged_spans_report_nothing():
         [cell(0, 0, 0, "Limit", col_span=2), cell(0, 1, 0, "Assay")],
     )
 
-    assert diff_merges(old_grid, new_grid) == []
+    assert _merges(old_grid, new_grid) == []
 
 
 def test_entry_point_matches_tables_by_content_despite_shifted_ids():
@@ -284,3 +292,203 @@ def test_entry_point_returns_nothing_when_there_are_no_tables():
 
     assert changes == []
     assert excluded == set()
+
+
+def test_structural_changes_carry_table_identity():
+    # A structural row used to carry section="" and no coordinates, which left
+    # a blank entry in the section filter and crashed the Detailed Changes page.
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Hardness"), cell(0, 1, 1, "8 kg")],
+    )
+
+    changes, _excluded, _alignment = diff_rows(old_grid, new_grid)
+
+    added = [c for c in changes if c.change_type == "table_row_added"][0]
+    assert added.section == "Table 1"
+    assert added.new_table_position is not None
+    assert added.new_table_position.table_id == 0
+    assert added.new_table_position.row == 1
+
+
+def test_deleted_row_carries_only_an_old_position():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Hardness"), cell(0, 1, 1, "8 kg")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec")],
+    )
+
+    changes, _excluded, _alignment = diff_rows(old_grid, new_grid)
+
+    deleted = [c for c in changes if c.change_type == "table_row_deleted"][0]
+    assert deleted.section == "Table 1"
+    assert deleted.old_table_position.row == 1
+    assert deleted.new_table_position is None
+
+
+def test_moved_row_carries_both_positions():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"),
+         cell(0, 2, 0, "Water"), cell(0, 2, 1, "2.0 percent")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Water"), cell(0, 1, 1, "2.0 percent"),
+         cell(0, 2, 0, "Assay"), cell(0, 2, 1, "95 percent")],
+    )
+
+    changes, _excluded, _alignment = diff_rows(old_grid, new_grid)
+
+    moved = [c for c in changes if c.change_type == "table_row_moved"][0]
+    assert moved.old_table_position.row == 2
+    assert moved.new_table_position.row == 1
+
+
+def test_column_changes_carry_a_column_coordinate():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"), cell(0, 0, 2, "Method"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"), cell(0, 1, 2, "HPLC")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent")],
+    )
+
+    _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+    changes, _excluded, _col_alignment = diff_columns(old_grid, new_grid, row_alignment)
+
+    deleted = [c for c in changes if c.change_type == "table_column_deleted"][0]
+    assert deleted.section == "Table 1"
+    assert deleted.old_table_position.col == 2
+    assert deleted.new_table_position is None
+
+
+def _table(rows, table_id=0):
+    return [
+        cell(table_id, row_index, col_index, text)
+        for row_index, row in enumerate(rows)
+        for col_index, text in enumerate(row)
+    ]
+
+
+_THREE_COLUMN_TABLE = [
+    ["Parameter", "Specification", "Method"],
+    ["Assay", "95.0 to 105.0 percent", "HPLC"],
+    ["Water content", "Not more than 2.0 percent", "Karl Fischer"],
+]
+
+_TWO_COLUMN_TABLE = [row[:2] for row in _THREE_COLUMN_TABLE]
+
+
+def test_deleting_a_column_does_not_split_rows():
+    # 3-column table loses its Method column; rows are otherwise untouched.
+    # Matching rows on full-width text pushed them across the 0.85 threshold
+    # and produced two false row deletes plus two false row adds.
+    changes, _excluded = detect_table_structure_changes(
+        _table(_THREE_COLUMN_TABLE), _table(_TWO_COLUMN_TABLE)
+    )
+
+    types = [c.change_type for c in changes]
+    assert types.count("table_column_deleted") == 1
+    assert "table_row_deleted" not in types
+    assert "table_row_added" not in types
+
+
+def test_adding_a_column_does_not_split_rows():
+    changes, _excluded = detect_table_structure_changes(
+        _table(_TWO_COLUMN_TABLE), _table(_THREE_COLUMN_TABLE)
+    )
+
+    types = [c.change_type for c in changes]
+    assert types.count("table_column_added") == 1
+    assert "table_row_deleted" not in types
+    assert "table_row_added" not in types
+
+
+def test_a_column_delete_does_not_suppress_an_edit_in_a_surviving_column():
+    # The suppression rule cuts both ways: only the deleted column's own cells
+    # may be excluded, never a cell that was independently edited.
+    old_paragraphs = _table(_THREE_COLUMN_TABLE)
+    new_paragraphs = _table([
+        ["Parameter", "Specification"],
+        ["Assay", "98.0 to 102.0 percent"],
+        ["Water content", "Not more than 2.0 percent"],
+    ])
+
+    changes, excluded = detect_table_structure_changes(old_paragraphs, new_paragraphs)
+
+    assert [c.change_type for c in changes] == ["table_column_deleted"]
+    edited = [p for p in new_paragraphs if p.text == "98.0 to 102.0 percent"]
+    assert id(edited[0]) not in excluded
+
+
+def test_merge_detection_is_unaffected_by_an_inserted_row():
+    # A row inserted ABOVE an untouched merged cell shifts its index. Comparing
+    # raw indices compared two unrelated cells and invented a merge change.
+    old_paragraphs = [
+        cell(0, 0, 0, "Parameter"), cell(0, 0, 1, "Specification"),
+        cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95.0 percent"),
+        cell(0, 2, 0, "Combined limits note", col_span=2),
+    ]
+    new_paragraphs = [
+        cell(0, 0, 0, "Parameter"), cell(0, 0, 1, "Specification"),
+        cell(0, 1, 0, "Hardness"), cell(0, 1, 1, "8 kg"),
+        cell(0, 2, 0, "Assay"), cell(0, 2, 1, "95.0 percent"),
+        cell(0, 3, 0, "Combined limits note", col_span=2),
+    ]
+
+    changes, _excluded = detect_table_structure_changes(old_paragraphs, new_paragraphs)
+
+    types = [c.change_type for c in changes]
+    assert types.count("table_cell_merge_changed") == 0
+    assert types.count("table_row_added") == 1
+
+
+def test_a_genuine_merge_on_a_shifted_row_is_still_detected():
+    # The false-negative half of the same bug: the real merge sat on a row whose
+    # index moved, so raw comparison checked the wrong cell and missed it.
+    old_paragraphs = [
+        cell(0, 0, 0, "Parameter"), cell(0, 0, 1, "Specification"),
+        cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95.0 percent"),
+        cell(0, 2, 0, "Combined limits note"), cell(0, 2, 1, "See appendix"),
+    ]
+    new_paragraphs = [
+        cell(0, 0, 0, "Parameter"), cell(0, 0, 1, "Specification"),
+        cell(0, 1, 0, "Hardness"), cell(0, 1, 1, "8 kg"),
+        cell(0, 2, 0, "Assay"), cell(0, 2, 1, "95.0 percent"),
+        cell(0, 3, 0, "Combined limits note", col_span=2),
+    ]
+
+    changes, _excluded = detect_table_structure_changes(old_paragraphs, new_paragraphs)
+
+    merges = [c for c in changes if c.change_type == "table_cell_merge_changed"]
+    assert len(merges) == 1
+    assert merges[0].old_table_position.row == 2
+    assert merges[0].new_table_position.row == 3
+
+
+def test_introducing_a_merge_does_not_fake_a_column_delete_and_add():
+    # A horizontal merge vacates a grid position, so the column reads as emptied
+    # and its similarity collapsed below threshold (measured 0.706 and 0.753),
+    # producing a Medium-risk false pair that outranked the correct merge row.
+    old_paragraphs = [
+        cell(0, 0, 0, "Analytical"), cell(0, 0, 1, "Results"),
+        cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"),
+        cell(0, 2, 0, "Water"), cell(0, 2, 1, "2.0 percent"),
+    ]
+    new_paragraphs = [
+        cell(0, 0, 0, "Analytical Results", col_span=2),
+        cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"),
+        cell(0, 2, 0, "Water"), cell(0, 2, 1, "2.0 percent"),
+    ]
+
+    changes, excluded = detect_table_structure_changes(old_paragraphs, new_paragraphs)
+
+    assert [c.change_type for c in changes] == ["table_cell_merge_changed"]
+    assert excluded == set()
+
+
+def test_identical_line_lists_short_circuit_to_an_identity_mapping():
+    # Embedding two identical lists to rediscover an identity mapping dominated
+    # the cost on a document whose tables were mostly untouched.
+    texts = ["Param | Spec", "Assay | 95 percent", "Water | 2.0 percent"]
+
+    assert _match_lines(texts, list(texts)) == [(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0)]

@@ -1,8 +1,11 @@
+import uuid
 from dataclasses import dataclass, field
 
+from app import risk_rules
 from app.embeddings import embed_texts, cosine_similarity_matrix
 from app.matching import greedy_match
-from app.models import Paragraph
+from app.models import Change, Paragraph
+from app.section_structure import _longest_increasing_subsequence_indices
 
 # Same threshold move_reconciliation uses. Rows are short, so genuinely
 # different rows score far below this while an edited row scores well above -
@@ -88,3 +91,61 @@ def match_tables(
         (old_list[i], new_list[j])
         for i, j, _ in greedy_match(scores, TABLE_MATCH_THRESHOLD)
     ]
+
+
+def _line_change(change_type: str, old_text: str, new_text: str, reason: str) -> Change:
+    return Change(
+        change_id=str(uuid.uuid4()), section="", change_type=change_type,
+        old_text=old_text, new_text=new_text, old_page=None, new_page=None,
+        confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+        reason=reason, source="Table",
+    )
+
+
+def diff_rows(
+    old_grid: TableGrid, new_grid: TableGrid
+) -> tuple[list[Change], set[int], list[tuple[int, int]]]:
+    old_rows, new_rows = old_grid.rows, new_grid.rows
+    pairs = _match_lines(
+        [old_grid.row_text(r) for r in old_rows],
+        [new_grid.row_text(r) for r in new_rows],
+    )
+    matched_old = {i for i, _, _ in pairs}
+    matched_new = {j for _, j, _ in pairs}
+
+    changes: list[Change] = []
+    excluded: set[int] = set()
+
+    for index, row in enumerate(old_rows):
+        if index in matched_old:
+            continue
+        changes.append(_line_change(
+            "table_row_deleted", old_grid.row_text(row), "",
+            f"Table row {row + 1} removed.",
+        ))
+        excluded.update(id(p) for p in old_grid.row_paragraphs(row))
+
+    for index, row in enumerate(new_rows):
+        if index in matched_new:
+            continue
+        changes.append(_line_change(
+            "table_row_added", "", new_grid.row_text(row),
+            f"Table row {row + 1} added.",
+        ))
+        excluded.update(id(p) for p in new_grid.row_paragraphs(row))
+
+    # A matched row sitting outside the longest increasing subsequence of new
+    # positions has moved. Its cells are deliberately NOT excluded - a move must
+    # never suppress an edit to a cell inside the row that moved.
+    ordered = sorted(pairs)
+    kept = _longest_increasing_subsequence_indices([j for _, j, _ in ordered])
+    for position, (i, j, _score) in enumerate(ordered):
+        if position in kept:
+            continue
+        changes.append(_line_change(
+            "table_row_moved", old_grid.row_text(old_rows[i]), new_grid.row_text(new_rows[j]),
+            f"Table row moved from position {old_rows[i] + 1} to position {new_rows[j] + 1}.",
+        ))
+
+    row_alignment = [(old_rows[i], new_rows[j]) for i, j, _ in ordered]
+    return changes, excluded, row_alignment

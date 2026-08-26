@@ -49,3 +49,9 @@ def test_section_renumbered_cascade_is_informational_risk():
     # DEFAULT_RISK of "Medium", which would silently promote a cascade above
     # the renumbering it replaces.
     assert assign_risk("section_renumbered_cascade") == "Informational"
+
+
+def test_table_row_change_types_have_explicit_risk():
+    assert assign_risk("table_row_added") == "Medium"
+    assert assign_risk("table_row_deleted") == "Medium"
+    assert assign_risk("table_row_moved") == "Informational"

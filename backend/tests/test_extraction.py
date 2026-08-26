@@ -1815,3 +1815,46 @@ def test_extract_docx_footnote_in_mc_alternate_content_text_box_is_extracted_onc
     footnote_headings = [par.text for par in paragraphs if par.text.startswith("Footnote ")]
     assert footnote_headings == ["Footnote 1"]
     assert [par.text for par in paragraphs].count("Should appear exactly once.") == 1
+
+
+def test_merge_spans_are_captured_for_both_directions(tmp_path):
+    # row.cells returns a merged cell once per grid position it occupies, and all
+    # those proxies wrap one w:tc element - so counting distinct row and column
+    # indices per element gives both spans with one mechanism.
+    file_path = tmp_path / "merged.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=3, cols=3)
+    for r in range(3):
+        for c in range(3):
+            table.rows[r].cells[c].text = f"r{r}c{c}"
+    table.rows[0].cells[0].merge(table.rows[0].cells[1])   # horizontal, span 2
+    table.rows[1].cells[2].merge(table.rows[2].cells[2])   # vertical, span 2
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    spans = {
+        (p.table_position.row, p.table_position.col):
+            (p.table_position.row_span, p.table_position.col_span)
+        for p in paragraphs if p.table_position is not None
+    }
+
+    assert spans[(0, 0)] == (1, 2)
+    assert spans[(1, 2)] == (2, 1)
+    assert spans[(1, 0)] == (1, 1)
+    assert spans[(2, 0)] == (1, 1)
+
+
+def test_unmerged_table_cells_all_have_span_one(tmp_path):
+    file_path = tmp_path / "plain.docx"
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    for r in range(2):
+        for c in range(2):
+            table.rows[r].cells[c].text = f"r{r}c{c}"
+    doc.save(str(file_path))
+
+    paragraphs = extract_text(str(file_path), "docx")
+    positions = [p.table_position for p in paragraphs if p.table_position is not None]
+
+    assert len(positions) == 4
+    assert all(pos.row_span == 1 and pos.col_span == 1 for pos in positions)

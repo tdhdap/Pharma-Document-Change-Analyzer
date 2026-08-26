@@ -7,6 +7,11 @@ class TableCoordinate:
     table_id: int
     row: int
     col: int
+    # Defaults keep every existing construction site, every row reloaded by
+    # repository._row_to_change, and the PDF/TXT paths working untouched. Spans
+    # are used only during table diffing and are deliberately not persisted.
+    row_span: int = 1
+    col_span: int = 1
 
 
 @dataclass

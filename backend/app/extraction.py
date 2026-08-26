@@ -87,6 +87,23 @@ def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True, table_i
             yield item, allow_text_pattern_heading, False, None
         elif isinstance(item, DocxTable):
             table_id = next(table_id_counter)
+            # Pre-pass: a merged cell's span is the number of distinct grid rows and
+            # columns its single w:tc element occupies. It cannot be read at the
+            # anchor, because the positions it also occupies have not been visited
+            # yet - and w:vMerge records only restart/continue, never a count.
+            #
+            # cell_proxies holds every proxy alive for the duration. lxml only
+            # guarantees a stable identity for an element while some reference to
+            # its proxy exists, and python-docx re-derives a vertically merged
+            # cell's _tc on each lookup - without this, merged positions read as
+            # distinct elements and every span comes back as 1.
+            cell_proxies = [list(r.cells) for r in item.rows]
+            rows_by_element: dict = {}
+            cols_by_element: dict = {}
+            for r_index, proxy_row in enumerate(cell_proxies):
+                for c_index, proxy in enumerate(proxy_row):
+                    rows_by_element.setdefault(proxy._tc, set()).add(r_index)
+                    cols_by_element.setdefault(proxy._tc, set()).add(c_index)
             seen_cells = set()
             for row_index, row in enumerate(item.rows):
                 for col_index, cell in enumerate(row.cells):
@@ -120,7 +137,11 @@ def _iter_docx_paragraphs(content_iter, allow_text_pattern_heading=True, table_i
                     # verified empirically against real horizontal and vertical merges before
                     # writing this. This is the same fact the dedup above already relies on,
                     # just also read as the cell's grid coordinate.
-                    position = TableCoordinate(table_id=table_id, row=row_index, col=col_index)
+                    position = TableCoordinate(
+                        table_id=table_id, row=row_index, col=col_index,
+                        row_span=len(rows_by_element.get(cell._tc, {row_index})),
+                        col_span=len(cols_by_element.get(cell._tc, {col_index})),
+                    )
                     for para, _, _, inner_position in _iter_docx_paragraphs(
                         cell.iter_inner_content(),
                         allow_text_pattern_heading=False,

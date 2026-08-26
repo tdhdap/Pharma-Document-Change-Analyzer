@@ -55,3 +55,9 @@ def test_table_row_change_types_have_explicit_risk():
     assert assign_risk("table_row_added") == "Medium"
     assert assign_risk("table_row_deleted") == "Medium"
     assert assign_risk("table_row_moved") == "Informational"
+
+
+def test_table_column_change_types_have_explicit_risk():
+    assert assign_risk("table_column_added") == "Medium"
+    assert assign_risk("table_column_deleted") == "Medium"
+    assert assign_risk("table_column_moved") == "Informational"

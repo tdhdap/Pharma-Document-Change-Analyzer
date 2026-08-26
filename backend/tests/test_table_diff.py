@@ -1,5 +1,5 @@
 from app.models import Paragraph, TableCoordinate
-from app.table_diff import build_grids, match_tables, _match_lines, diff_rows
+from app.table_diff import build_grids, match_tables, _match_lines, diff_rows, diff_columns
 
 
 def cell(table_id, row, col, text, row_span=1, col_span=1):
@@ -166,4 +166,56 @@ def test_row_whose_cells_were_edited_is_matched_not_added_and_deleted():
     changes, excluded, _alignment = diff_rows(old_grid, new_grid)
 
     assert changes == []
+    assert excluded == set()
+
+
+def test_column_added_is_reported_once_with_the_whole_column():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"), cell(0, 0, 2, "Method"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"), cell(0, 1, 2, "HPLC")],
+    )
+
+    _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+
+    added = [c for c in changes if c.change_type == "table_column_added"]
+    assert len(added) == 1
+    assert added[0].new_text == "Method | HPLC"
+    assert added[0].ai_risk_level == "Medium"
+    assert len(excluded) == 2
+
+
+def test_column_deleted_is_reported_once_and_its_cells_excluded():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"), cell(0, 0, 2, "Method"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"), cell(0, 1, 2, "HPLC")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent")],
+    )
+
+    _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+
+    deleted = [c for c in changes if c.change_type == "table_column_deleted"]
+    assert len(deleted) == 1
+    assert deleted[0].old_text == "Method | HPLC"
+    assert len(excluded) == 2
+
+
+def test_column_moved_is_reported_and_its_cells_are_not_excluded():
+    old_grid, new_grid = _grids(
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Spec"), cell(0, 0, 2, "Method"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "95 percent"), cell(0, 1, 2, "HPLC")],
+        [cell(0, 0, 0, "Param"), cell(0, 0, 1, "Method"), cell(0, 0, 2, "Spec"),
+         cell(0, 1, 0, "Assay"), cell(0, 1, 1, "HPLC"), cell(0, 1, 2, "95 percent")],
+    )
+
+    _row_changes, _row_excluded, row_alignment = diff_rows(old_grid, new_grid)
+    changes, excluded = diff_columns(old_grid, new_grid, row_alignment)
+
+    moved = [c for c in changes if c.change_type == "table_column_moved"]
+    assert len(moved) == 1
+    assert moved[0].ai_risk_level == "Informational"
     assert excluded == set()

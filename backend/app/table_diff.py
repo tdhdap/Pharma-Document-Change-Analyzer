@@ -149,3 +149,54 @@ def diff_rows(
 
     row_alignment = [(old_rows[i], new_rows[j]) for i, j, _ in ordered]
     return changes, excluded, row_alignment
+
+
+def diff_columns(
+    old_grid: TableGrid, new_grid: TableGrid, row_alignment: list[tuple[int, int]]
+) -> tuple[list[Change], set[int]]:
+    old_cols, new_cols = old_grid.cols, new_grid.cols
+    # Compare columns only over rows that matched. Including an added or deleted
+    # row drags every column's similarity down - a real table scored its edited
+    # Limit column at 0.80 (below threshold, so a false delete+add pair) which
+    # rose to 0.94 once the added row was excluded from the comparison.
+    aligned_old = [r for r, _ in row_alignment]
+    aligned_new = [r for _, r in row_alignment]
+    pairs = _match_lines(
+        [" | ".join(old_grid.text_at(r, c) for r in aligned_old) for c in old_cols],
+        [" | ".join(new_grid.text_at(r, c) for r in aligned_new) for c in new_cols],
+    )
+    matched_old = {i for i, _, _ in pairs}
+    matched_new = {j for _, j, _ in pairs}
+
+    changes: list[Change] = []
+    excluded: set[int] = set()
+
+    for index, col in enumerate(old_cols):
+        if index in matched_old:
+            continue
+        changes.append(_line_change(
+            "table_column_deleted", old_grid.col_text(col), "",
+            f"Table column {col + 1} removed.",
+        ))
+        excluded.update(id(p) for p in old_grid.col_paragraphs(col))
+
+    for index, col in enumerate(new_cols):
+        if index in matched_new:
+            continue
+        changes.append(_line_change(
+            "table_column_added", "", new_grid.col_text(col),
+            f"Table column {col + 1} added.",
+        ))
+        excluded.update(id(p) for p in new_grid.col_paragraphs(col))
+
+    ordered = sorted(pairs)
+    kept = _longest_increasing_subsequence_indices([j for _, j, _ in ordered])
+    for position, (i, j, _score) in enumerate(ordered):
+        if position in kept:
+            continue
+        changes.append(_line_change(
+            "table_column_moved", old_grid.col_text(old_cols[i]), new_grid.col_text(new_cols[j]),
+            f"Table column moved from position {old_cols[i] + 1} to position {new_cols[j] + 1}.",
+        ))
+
+    return changes, excluded

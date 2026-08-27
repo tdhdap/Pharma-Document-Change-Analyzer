@@ -2,7 +2,7 @@ from app.models import Section, Paragraph, SectionMatch, TableCoordinate
 from app.section_structure import (
     detect_section_renumbering, detect_section_reordering,
     detect_section_added, detect_section_deleted, detect_section_heading_changed,
-    _summarize_section_content,
+    _summarize_section_content, _is_text_box_heading, _is_footnote_heading,
 )
 
 
@@ -868,3 +868,30 @@ def test_omitting_the_new_arguments_reports_everything_as_deliberate():
 
     assert [c.change_type for c in changes] == ["section_renumbered"]
     assert changes[0].reason == "Section renumbered from '2.0' to '3.0'."
+
+
+def test_is_text_box_heading_accepts_an_anchored_label():
+    assert _is_text_box_heading("Text Box 1")
+    assert _is_text_box_heading("Text Box 1 (8.0 Training Requirements, after paragraph 1)")
+    assert _is_text_box_heading("Text Box 1 (9.0 Training Log, at start)")
+
+
+def test_is_text_box_heading_accepts_the_nested_parentheses_a_header_anchor_produces():
+    # A header/footer label is itself parenthesised, so a text box anchored to one
+    # yields nested parentheses. The greedy .+ must consume the inner pair.
+    assert _is_text_box_heading("Text Box 3 (Page Footer (First Page))")
+
+
+def test_is_text_box_heading_still_rejects_non_labels():
+    assert not _is_text_box_heading("Text Box")
+    assert not _is_text_box_heading("My Text Box 1")
+
+
+def test_is_footnote_heading_accepts_an_anchored_label():
+    assert _is_footnote_heading("Footnote 1")
+    assert _is_footnote_heading("Footnote 12 (4.0 Procedure, paragraph 1)")
+
+
+def test_is_footnote_heading_still_rejects_non_labels():
+    assert not _is_footnote_heading("Footnote")
+    assert not _is_footnote_heading("See Footnote 1")

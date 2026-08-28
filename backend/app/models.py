@@ -100,6 +100,12 @@ class ComparisonSummary:
     medium_risk: int
     low_risk: int
     informational: int
+    sections_added: int = 0
+    sections_deleted: int = 0
+    sections_renamed: int = 0
+    sections_renumbered: int = 0
+    sections_cascaded: int = 0
+    sections_moved: int = 0
 
 
 @dataclass
@@ -118,4 +124,16 @@ def build_summary(changes: list[Change]) -> ComparisonSummary:
         medium_risk=sum(1 for c in changes if c.ai_risk_level == "Medium"),
         low_risk=sum(1 for c in changes if c.ai_risk_level == "Low"),
         informational=sum(1 for c in changes if c.ai_risk_level == "Informational"),
+        # Match change_type by EQUALITY, never by prefix. "section_renumbered_cascade"
+        # starts with "section_renumbered", so a startswith check would count every
+        # cascade in both metrics - inflating the exact number the split exists to
+        # clarify. sections_moved is section_reordered only: moved_paragraph and
+        # moved_table_content are content moving BETWEEN sections, and counting them
+        # here would report a moved section for a document where none moved.
+        sections_added=sum(1 for c in changes if c.change_type == "section_added"),
+        sections_deleted=sum(1 for c in changes if c.change_type == "section_deleted"),
+        sections_renamed=sum(1 for c in changes if c.change_type == "section_heading_changed"),
+        sections_renumbered=sum(1 for c in changes if c.change_type == "section_renumbered"),
+        sections_cascaded=sum(1 for c in changes if c.change_type == "section_renumbered_cascade"),
+        sections_moved=sum(1 for c in changes if c.change_type == "section_reordered"),
     )

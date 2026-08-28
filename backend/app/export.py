@@ -25,6 +25,12 @@ def to_json(comparison: ComparisonResult) -> dict:
             "medium_risk": comparison.summary.medium_risk,
             "low_risk": comparison.summary.low_risk,
             "informational": comparison.summary.informational,
+            "sections_added": comparison.summary.sections_added,
+            "sections_deleted": comparison.summary.sections_deleted,
+            "sections_renamed": comparison.summary.sections_renamed,
+            "sections_renumbered": comparison.summary.sections_renumbered,
+            "sections_cascaded": comparison.summary.sections_cascaded,
+            "sections_moved": comparison.summary.sections_moved,
         },
         "changes": [
             {

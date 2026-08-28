@@ -56,6 +56,31 @@ def test_to_csv_has_header_and_one_row_per_change():
     assert rows[1][0] == "ch-1"
 
 
+def test_to_json_includes_structural_counts():
+    changes = [
+        Change(
+            change_id="ch-1", section="9.0 Training", change_type="section_added",
+            old_text="", new_text="9.0 Training", old_page=None, new_page=None,
+            confidence=1.0, ai_risk_level="High", reason="Section added.",
+        ),
+        Change(
+            change_id="ch-2", section="4.0 Approval", change_type="section_reordered",
+            old_text="4.0 Approval", new_text="4.0 Approval", old_page=None, new_page=None,
+            confidence=0.86, ai_risk_level="Informational", reason="Section moved.",
+        ),
+    ]
+    comparison = ComparisonResult(
+        comparison_id="CMP-002", old_document="v1.docx", new_document="v2.docx",
+        summary=build_summary(changes), changes=changes,
+    )
+
+    result = to_json(comparison)
+
+    assert result["summary"]["sections_added"] == 1
+    assert result["summary"]["sections_moved"] == 1
+    assert result["summary"]["sections_cascaded"] == 0
+
+
 def test_to_json_includes_source_field():
     comparison = make_comparison()
     comparison.changes[0].source = "Table"

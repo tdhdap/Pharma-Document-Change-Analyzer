@@ -10,6 +10,7 @@ from docx.oxml.ns import qn
 from app.extraction import extract_text, _docx_header_footer_specs, _header_footer_heading_text
 from app.extraction import _iter_text_box_paragraphs
 from app.extraction import _footnotes_root, _footnote_content_by_id
+from app.extraction import _anchor_label
 from app.sectioning import split_into_sections
 
 
@@ -1176,7 +1177,7 @@ def test_iter_text_box_paragraphs_finds_drawingml_text_box():
     doc = DocxDocument()
     _add_text_box(doc.element.body, ["Text box paragraph one.", "Text box paragraph two."])
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 1
     assert [p.text for p in groups[0]] == ["Text box paragraph one.", "Text box paragraph two."]
@@ -1186,7 +1187,7 @@ def test_iter_text_box_paragraphs_finds_vml_text_box():
     doc = DocxDocument()
     _add_text_box(doc.element.body, ["Legacy VML text box paragraph."], vml=True)
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 1
     assert [p.text for p in groups[0]] == ["Legacy VML text box paragraph."]
@@ -1202,7 +1203,7 @@ def test_iter_text_box_paragraphs_joins_multiple_runs():
     r.append(drawing)
     doc.element.body.append(p)
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 1
     assert [p.text for p in groups[0]] == ["Multi-run sentence."]
@@ -1212,7 +1213,7 @@ def test_iter_text_box_paragraphs_returns_nothing_when_none_present():
     doc = DocxDocument()
     doc.add_paragraph("Ordinary paragraph, no text box.")
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert groups == []
 
@@ -1222,7 +1223,7 @@ def test_iter_text_box_paragraphs_finds_multiple_text_boxes_as_separate_groups()
     _add_text_box(doc.element.body, ["First box text."])
     _add_text_box(doc.element.body, ["Second box text."])
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 2
     assert [p.text for p in groups[0]] == ["First box text."]
@@ -1235,7 +1236,7 @@ def test_iter_text_box_paragraphs_finds_text_box_inside_table_cell():
     cell_element = table.cell(0, 0)._tc
     _add_text_box(cell_element, ["Table cell text box."])
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 1
     assert [p.text for p in groups[0]] == ["Table cell text box."]
@@ -1256,7 +1257,7 @@ def test_iter_text_box_paragraphs_handles_nested_text_box_as_separate_group():
     r.append(outer_drawing)
     doc.element.body.append(p)
 
-    groups = list(_iter_text_box_paragraphs(doc.element.body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(doc.element.body, doc)]
 
     assert len(groups) == 2
     assert [p.text for p in groups[0]] == ["Outer box own text."]
@@ -1273,8 +1274,8 @@ def test_extract_docx_text_box_in_body_is_extracted(tmp_path):
     paragraphs = extract_text(str(file_path), "docx")
     texts = [p.text for p in paragraphs]
 
-    assert "Text Box 1" in texts
-    text_box_index = texts.index("Text Box 1")
+    assert "Text Box 1 (Preamble, after paragraph 1)" in texts
+    text_box_index = texts.index("Text Box 1 (Preamble, after paragraph 1)")
     assert paragraphs[text_box_index].is_heading is True
     assert "Text box content here." in texts
 
@@ -1302,10 +1303,10 @@ def test_extract_docx_multiple_text_boxes_get_sequential_numbers(tmp_path):
     paragraphs = extract_text(str(file_path), "docx")
     texts = [p.text for p in paragraphs]
 
-    assert "Text Box 1" in texts
-    assert "Text Box 2" in texts
-    assert texts.index("Text Box 1") < texts.index("First box.")
-    assert texts.index("Text Box 2") < texts.index("Second box.")
+    assert "Text Box 1 (Preamble, at start)" in texts
+    assert "Text Box 2 (Preamble, at start)" in texts
+    assert texts.index("Text Box 1 (Preamble, at start)") < texts.index("First box.")
+    assert texts.index("Text Box 2 (Preamble, at start)") < texts.index("Second box.")
 
 
 def test_extract_docx_empty_text_box_produces_no_pseudo_section(tmp_path):
@@ -1318,7 +1319,7 @@ def test_extract_docx_empty_text_box_produces_no_pseudo_section(tmp_path):
     paragraphs = extract_text(str(file_path), "docx")
     texts = [p.text for p in paragraphs]
 
-    assert "Text Box 1" not in texts
+    assert not any(t.startswith("Text Box ") for t in texts)
 
 
 def test_extract_docx_text_box_inside_active_first_page_header_is_extracted(tmp_path):
@@ -1333,7 +1334,7 @@ def test_extract_docx_text_box_inside_active_first_page_header_is_extracted(tmp_
     paragraphs = extract_text(str(file_path), "docx")
     texts = [p.text for p in paragraphs]
 
-    assert "Text Box 1" in texts
+    assert "Text Box 1 (Page Header (First Page))" in texts
     assert "First page header text box." in texts
 
 
@@ -1352,7 +1353,7 @@ def test_extract_docx_text_box_inside_inactive_variant_is_not_extracted(tmp_path
     texts = [p.text for p in paragraphs]
 
     assert "Inactive first page header text box." not in texts
-    assert "Text Box 1" not in texts
+    assert not any(t.startswith("Text Box ") for t in texts)
 
 
 def test_extract_docx_without_text_boxes_is_unchanged(tmp_path):
@@ -1422,7 +1423,7 @@ def test_iter_text_box_paragraphs_deduplicates_word_mc_alternate_content():
     body = doc.element.body
     _add_mc_alternate_content_text_box(body, ["Caution: wear gloves."])
 
-    groups = list(_iter_text_box_paragraphs(body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(body, doc)]
 
     assert len(groups) == 1
     assert [para.text for para in groups[0]] == ["Caution: wear gloves."]
@@ -1466,7 +1467,7 @@ def test_iter_text_box_paragraphs_extracts_nested_table_content():
     r.append(drawing)
     body.append(p)
 
-    groups = list(_iter_text_box_paragraphs(body, doc))
+    groups = [group for _txbx, group in _iter_text_box_paragraphs(body, doc)]
 
     assert len(groups) == 1
     assert [para.text for para in groups[0]] == ["Caption above table.", "Spec limit", "NMT 2.0%"]
@@ -1568,11 +1569,11 @@ def test_extract_docx_single_footnote_is_extracted(tmp_path):
     texts = [par.text for par in paragraphs]
     assert texts == [
         "This is a claim with a footnote reference.",
-        "Footnote 1",
+        "Footnote 1 (Preamble, paragraph 1)",
         "See ICH Q1A(R2) for stability testing requirements.",
     ]
     heading_flags = {par.text: par.is_heading for par in paragraphs}
-    assert heading_flags["Footnote 1"] is True
+    assert heading_flags["Footnote 1 (Preamble, paragraph 1)"] is True
     assert heading_flags["See ICH Q1A(R2) for stability testing requirements."] is False
 
 
@@ -1593,8 +1594,8 @@ def test_extract_docx_multiple_footnotes_get_sequential_numbers_in_reference_ord
     texts = [par.text for par in paragraphs]
     assert texts == [
         "First claim.", "Second claim.",
-        "Footnote 1", "First citation text.",
-        "Footnote 2", "Second citation text.",
+        "Footnote 1 (Preamble, paragraph 1)", "First citation text.",
+        "Footnote 2 (Preamble, paragraph 2)", "Second citation text.",
     ]
 
 
@@ -1662,7 +1663,7 @@ def test_extract_docx_footnote_with_nested_table_is_extracted(tmp_path):
     texts = [par.text for par in paragraphs]
     assert texts == [
         "Claim needing a reference standard.",
-        "Footnote 1", "Reference standards:", "USP", "Chapter 621",
+        "Footnote 1 (Preamble, paragraph 1)", "Reference standards:", "USP", "Chapter 621",
     ]
     table_para = next(par for par in paragraphs if par.text == "USP")
     assert table_para.from_table is False
@@ -1776,8 +1777,8 @@ def test_extract_docx_footnote_referenced_from_inside_text_box_is_extracted(tmp_
     texts = [par.text for par in paragraphs]
     assert texts == [
         "Ordinary body paragraph.",
-        "Text Box 1", "Callout text with a footnote.",
-        "Footnote 1", "Footnote referenced from inside a text box.",
+        "Text Box 1 (Preamble, after paragraph 1)", "Callout text with a footnote.",
+        "Footnote 1 (Preamble, after paragraph 1)", "Footnote referenced from inside a text box.",
     ]
 
 
@@ -1813,7 +1814,7 @@ def test_extract_docx_footnote_in_mc_alternate_content_text_box_is_extracted_onc
     paragraphs = extract_text(str(file_path), "docx")
 
     footnote_headings = [par.text for par in paragraphs if par.text.startswith("Footnote ")]
-    assert footnote_headings == ["Footnote 1"]
+    assert footnote_headings == ["Footnote 1 (Preamble, at start)"]
     assert [par.text for par in paragraphs].count("Should appear exactly once.") == 1
 
 
@@ -1858,3 +1859,89 @@ def test_unmerged_table_cells_all_have_span_one(tmp_path):
 
     assert len(positions) == 4
     assert all(pos.row_span == 1 and pos.col_span == 1 for pos in positions)
+
+
+def test_anchor_label_inside_an_emitted_paragraph():
+    assert _anchor_label("4.0 Procedure", 0, True) == "4.0 Procedure, paragraph 1"
+    assert _anchor_label("4.0 Procedure", 2, True) == "4.0 Procedure, paragraph 3"
+
+
+def test_anchor_label_between_paragraphs_when_the_anchor_was_dropped():
+    assert _anchor_label("8.0 Training", 1, False) == "8.0 Training, after paragraph 1"
+
+
+def test_anchor_label_at_start_when_nothing_precedes_it():
+    # "after paragraph 0" would be nonsense; a real corpus text box hits this.
+    assert _anchor_label("9.0 Training Log", 0, False) == "9.0 Training Log, at start"
+
+
+def test_extract_docx_text_box_anchor_names_the_enclosing_heading(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_heading("4.0 Procedure", level=1)
+    doc.add_paragraph("Body paragraph under the heading.")
+    _add_text_box(doc.element.body, ["Callout content."])
+    doc.save(str(file_path))
+
+    texts = [p.text for p in extract_text(str(file_path), "docx")]
+
+    assert "Text Box 1 (4.0 Procedure, after paragraph 1)" in texts
+
+
+def test_extract_docx_text_box_anchor_uses_a_text_pattern_heading(tmp_path):
+    # The heading test must be sectioning._is_heading_paragraph, not model.is_heading.
+    # An ALL-CAPS heading has no Heading style, so model.is_heading is False for it,
+    # but split_into_sections treats it as a heading - 10 corpus documents rely on this.
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Opening body text.")
+    doc.add_paragraph("RECORD RETENTION")
+    doc.add_paragraph("Records are retained for five years.")
+    _add_text_box(doc.element.body, ["Callout content."])
+    doc.save(str(file_path))
+
+    texts = [p.text for p in extract_text(str(file_path), "docx")]
+
+    assert "Text Box 1 (RECORD RETENTION, after paragraph 1)" in texts
+
+
+def test_extract_docx_two_text_boxes_at_one_position_stay_distinguishable(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    _add_text_box(doc.element.body, ["First box."])
+    _add_text_box(doc.element.body, ["Second box."])
+    doc.save(str(file_path))
+
+    texts = [p.text for p in extract_text(str(file_path), "docx")]
+
+    assert "Text Box 1 (Preamble, at start)" in texts
+    assert "Text Box 2 (Preamble, at start)" in texts
+
+
+def test_extract_docx_footnote_anchor_names_the_paragraph_it_sits_in(tmp_path):
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_heading("4.0 Procedure", level=1)
+    doc.add_paragraph("First body paragraph.")
+    p = doc.add_paragraph("Second body paragraph.")
+    _add_footnote_reference(p, "1")
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Citation text."])])
+
+    texts = [par.text for par in extract_text(str(file_path), "docx")]
+
+    assert "Footnote 1 (4.0 Procedure, paragraph 2)" in texts
+
+
+def test_extract_docx_footnote_in_a_paragraph_with_no_text_anchors_between(tmp_path):
+    # A paragraph holding only the reference marker is dropped by
+    # _docx_paragraph_to_model, so the shared rule reports it as between paragraphs.
+    file_path = tmp_path / "doc.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("Body paragraph.")
+    p = doc.add_paragraph("")
+    _add_footnote_reference(p, "1")
+    _save_docx_with_footnotes(doc, str(file_path), [("1", ["Citation text."])])
+
+    texts = [par.text for par in extract_text(str(file_path), "docx")]
+
+    assert "Footnote 1 (Preamble, after paragraph 1)" in texts

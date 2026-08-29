@@ -3,6 +3,7 @@ from app.section_structure import (
     detect_section_renumbering, detect_section_reordering,
     detect_section_added, detect_section_deleted, detect_section_heading_changed,
     _summarize_section_content, _is_text_box_heading, _is_footnote_heading,
+    _heading_rewrite_similarity, HEADING_REWRITE_SIMILARITY_THRESHOLD,
 )
 
 
@@ -367,7 +368,11 @@ def test_pure_rewording_is_detected():
     assert c.section == "8.0 Deviation Handling"
     assert c.old_text == "8.0 Deviation Handling"
     assert c.new_text == "8.0 Non-Conformance Management"
-    assert c.reason == "Section heading changed from '8.0 Deviation Handling' to '8.0 Non-Conformance Management'."
+    assert c.reason == (
+        "Section heading changed from '8.0 Deviation Handling' to "
+        "'8.0 Non-Conformance Management'. Headings differ substantially "
+        "(similarity 0.24); sections matched on content."
+    )
     assert c.ai_risk_level == "Medium"
     assert c.source == "Body"
     assert c.confidence == 1.0
@@ -895,3 +900,74 @@ def test_is_footnote_heading_accepts_an_anchored_label():
 def test_is_footnote_heading_still_rejects_non_labels():
     assert not _is_footnote_heading("Footnote")
     assert not _is_footnote_heading("See Footnote 1")
+
+
+def test_matched_section_rows_carry_the_real_match_score():
+    old_sections = [Section(heading="2.0 Acceptance Criteria", paragraphs=[Paragraph(text="body")])]
+    new_sections = [Section(heading="3.0 Acceptance Criteria", paragraphs=[Paragraph(text="body")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=0.87)]
+
+    changes = detect_section_renumbering(matches, old_sections, new_sections)
+
+    assert changes[0].confidence == 0.87
+
+
+def test_added_and_deleted_sections_keep_confidence_of_one():
+    # These sections were never matched - there is no score to report, and
+    # inventing one would be the same lie as the hardcoded 1.0 being removed
+    # elsewhere. Their blank Match column is produced by the frontend instead.
+    added = detect_section_added([0], [Section(heading="9.0 New", paragraphs=[Paragraph(text="body")])])
+    deleted = detect_section_deleted([0], [Section(heading="9.0 Old", paragraphs=[Paragraph(text="body")])])
+
+    assert added[0].confidence == 1.0
+    assert deleted[0].confidence == 1.0
+
+
+def test_heading_rewrite_similarity_ignores_the_number():
+    # With the number left in, a pure renumber scores 0.782 while a genuine
+    # rewrite scores 0.869 - the number inverts the signal. Stripped, a renumber
+    # is exactly 1.0.
+    assert _heading_rewrite_similarity("4.0 Approval", "2.0 Approval") == 1.0
+
+
+def test_heading_rewrite_similarity_falls_for_a_real_rewrite():
+    assert _heading_rewrite_similarity("2.0 Scope", "2.0 Applicability") < HEADING_REWRITE_SIMILARITY_THRESHOLD
+
+
+def test_heading_rewrite_similarity_stays_high_for_a_trivial_edit():
+    assert _heading_rewrite_similarity("4.0 Approval", "4.0 Approvals") >= HEADING_REWRITE_SIMILARITY_THRESHOLD
+
+
+def test_substantially_changed_heading_says_it_matched_on_content():
+    old_sections = [Section(heading="2.0 Scope", paragraphs=[Paragraph(text="Applies to all batches.")])]
+    new_sections = [Section(heading="2.0 Applicability", paragraphs=[Paragraph(text="Applies to all batches.")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=0.89)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert "Headings differ substantially" in changes[0].reason
+    assert "sections matched on content" in changes[0].reason
+
+
+def test_a_trivially_changed_heading_does_not_claim_a_judgment_call():
+    old_sections = [Section(heading="4.0 Approval", paragraphs=[Paragraph(text="QA approves.")])]
+    new_sections = [Section(heading="4.0 Approvals", paragraphs=[Paragraph(text="QA approves.")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=0.98)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert "matched on content" not in changes[0].reason
+
+
+def test_removing_a_heading_number_is_still_reported():
+    # Guard: the clause must not be wired into the existing number-stripping skip.
+    # That skip only fires when BOTH headings are numbered; reusing it here would
+    # make this pair compare equal and vanish.
+    old_sections = [Section(heading="2.0 Scope", paragraphs=[Paragraph(text="body")])]
+    new_sections = [Section(heading="Scope", paragraphs=[Paragraph(text="body")])]
+    matches = [SectionMatch(old_index=0, new_index=0, score=0.95)]
+
+    changes = detect_section_heading_changed(matches, old_sections, new_sections)
+
+    assert len(changes) == 1
+    assert "matched on content" not in changes[0].reason

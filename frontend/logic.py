@@ -39,6 +39,31 @@ def format_table_cell(old_position: dict | None, new_position: dict | None) -> s
 _WHOLE_SECTION_CHANGE_TYPES = {"section_added", "section_deleted"}
 
 
+# Only these rows are produced by matching one thing to another, so only these
+# have a match score worth showing. section_added/section_deleted are absent on
+# purpose: those sections were never matched, so there is no score, and the blank
+# tells the reviewer that. Regex- and LLM-derived rows are absent because their
+# confidence means something else entirely (a regex is deterministic, an LLM is
+# grading itself) and mixing metrics in one column invites misreading.
+_MATCH_DERIVED_CHANGE_TYPES = {
+    "section_heading_changed",
+    "section_renumbered",
+    "section_renumbered_cascade",
+    "section_reordered",
+    "moved_paragraph",
+    "moved_table_content",
+}
+
+
+def format_match_confidence(change: dict) -> str:
+    if change.get("change_type") not in _MATCH_DERIVED_CHANGE_TYPES:
+        return ""
+    confidence = change.get("confidence")
+    if confidence is None:
+        return ""
+    return f"{confidence:.2f}"
+
+
 def categorize_change(change: dict) -> str:
     # A whole-section row is not a cell-level row: it has no table coordinates
     # to render in the Row/Col columns, and routing it to Tables makes

@@ -9,7 +9,7 @@ from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
 
 from app.models import Paragraph, TableCoordinate
-from app.sectioning import _looks_like_heading_shape
+from app.sectioning import _is_heading_paragraph, _looks_like_heading_shape
 
 _MC_FALLBACK_TAG = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
@@ -212,7 +212,20 @@ def _iter_text_box_paragraphs(root_element, doc):
     for txbx in root_element.findall(".//" + qn("w:txbxContent")):
         if _has_mc_fallback_ancestor(txbx):
             continue
-        yield [para for para, _, _, _ in _iter_docx_paragraphs(_content_iter(txbx, doc))]
+        yield txbx, [para for para, _, _, _ in _iter_docx_paragraphs(_content_iter(txbx, doc))]
+
+
+def _anchor_label(heading: str, paragraphs_before: int, inside_paragraph: bool) -> str:
+    # One rule, keyed on whether the anchoring paragraph survived extraction. A
+    # footnote normally lives inside a real paragraph, while Word parks a floating
+    # text box in a paragraph of its own with no text - which _docx_paragraph_to_model
+    # drops - so the box sits between paragraphs rather than in one. Verified on the
+    # real corpus: every text box anchor paragraph was empty, every footnote's was not.
+    if inside_paragraph:
+        return f"{heading}, paragraph {paragraphs_before + 1}"
+    if paragraphs_before == 0:
+        return f"{heading}, at start"
+    return f"{heading}, after paragraph {paragraphs_before}"
 
 
 _FOOTNOTES_RELTYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
@@ -343,11 +356,33 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
 
     paragraphs: list[Paragraph] = []
     index = 0
-    footnote_refs_in_order: list[str] = []
+    footnote_refs_in_order: list[tuple[str, str]] = []
     seen_footnote_ids: set[str] = set()
+    text_box_anchors: dict = {}
+    anchor_heading = "Preamble"
+    anchor_paragraph_count = 0
     for para, allow_text_pattern_heading, from_table, table_position in _iter_docx_paragraphs(
         doc.iter_inner_content(), table_id_counter=table_id_counter
     ):
+        # The model is built first so the anchor can tell whether this paragraph will
+        # actually be emitted. _is_heading_paragraph - not model.is_heading - is the
+        # boundary test, because it is the same predicate split_into_sections uses;
+        # model.is_heading misses numbered and ALL-CAPS headings, which 10 corpus
+        # documents contain.
+        model = _docx_paragraph_to_model(
+            para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
+        )
+        in_heading = model is not None and _is_heading_paragraph(model)
+        if in_heading:
+            anchor_heading = model.text
+            anchor_paragraph_count = 0
+        anchor = _anchor_label(
+            anchor_heading, anchor_paragraph_count, model is not None and not in_heading
+        )
+        for txbx in para._p.findall(".//" + qn("w:txbxContent")):
+            if _has_mc_fallback_ancestor(txbx):
+                continue
+            text_box_anchors[txbx] = anchor
         # Collecting footnote reference ids here, in the same walk that already visits
         # every body paragraph, avoids a second full-body traversal just to find them.
         # Word 2010+ wraps a user text box in mc:AlternateContent containing both a
@@ -363,13 +398,12 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             if ref_id in seen_footnote_ids:
                 continue
             seen_footnote_ids.add(ref_id)
-            footnote_refs_in_order.append(ref_id)
-        model = _docx_paragraph_to_model(
-            para, index, baseline_pt, allow_text_pattern_heading, from_table, table_position
-        )
+            footnote_refs_in_order.append((ref_id, anchor))
         if model is not None:
             paragraphs.append(model)
             index += 1
+            if not in_heading:
+                anchor_paragraph_count += 1
 
     multi_section = len(doc.sections) > 1
     header_footer_specs = _docx_header_footer_specs(doc)
@@ -396,15 +430,23 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
                 paragraphs.append(model)
                 index += 1
 
-    text_box_roots = [doc.element.body] + [source._element for _, _, _, source in header_footer_specs]
+    # A header/footer box has no body paragraph to anchor to, so it falls back to that
+    # header/footer's own label and carries no ordinal - "paragraph 3 of the footer" is
+    # not a location anyone navigates to.
+    text_box_roots = [(doc.element.body, None)] + [
+        (source._element, _header_footer_heading_text(kind, section_index, variant_label, multi_section))
+        for kind, section_index, variant_label, source in header_footer_specs
+    ]
     text_box_number = 0
-    for root_element in text_box_roots:
-        for group in _iter_text_box_paragraphs(root_element, doc):
+    for root_element, fallback_anchor in text_box_roots:
+        for txbx, group in _iter_text_box_paragraphs(root_element, doc):
             group = [p for p in group if p.text.strip()]
             if not group:
                 continue
             text_box_number += 1
-            paragraphs.append(Paragraph(text=f"Text Box {text_box_number}", paragraph_index=index, is_heading=True))
+            anchor = text_box_anchors.get(txbx, fallback_anchor)
+            label = f"Text Box {text_box_number}" + (f" ({anchor})" if anchor else "")
+            paragraphs.append(Paragraph(text=label, paragraph_index=index, is_heading=True))
             index += 1
             for para in group:
                 model = _docx_paragraph_to_model(para, index, baseline_pt, allow_text_pattern_heading=False)
@@ -416,7 +458,7 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
     if footnotes_root is not None and footnote_refs_in_order:
         footnote_content_by_id = _footnote_content_by_id(footnotes_root, doc)
         footnote_number = 0
-        for footnote_id in footnote_refs_in_order:
+        for footnote_id, anchor in footnote_refs_in_order:
             group = footnote_content_by_id.get(footnote_id)
             if not group:
                 continue
@@ -424,7 +466,8 @@ def _extract_docx(file_path: str) -> list[Paragraph]:
             if not group:
                 continue
             footnote_number += 1
-            paragraphs.append(Paragraph(text=f"Footnote {footnote_number}", paragraph_index=index, is_heading=True))
+            label = f"Footnote {footnote_number}" + (f" ({anchor})" if anchor else "")
+            paragraphs.append(Paragraph(text=label, paragraph_index=index, is_heading=True))
             index += 1
             for footnote_para in group:
                 model = _docx_paragraph_to_model(footnote_para, index, baseline_pt, allow_text_pattern_heading=False)

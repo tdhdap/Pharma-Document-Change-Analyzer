@@ -982,3 +982,27 @@ def test_pipeline_reports_an_added_table_row_once_instead_of_per_cell(monkeypatc
     assert change_types.count("table_row_added") == 1
     # The two cells of the added row must not also be reported individually.
     assert "added_table_content" not in change_types
+
+
+def test_pipeline_a_text_box_whose_anchor_changed_reports_no_heading_change(monkeypatch):
+    # Adding a section above a text box shifts its anchor without the box moving.
+    # This happens for real in the corpus (7.0 References -> 8.0 Training Requirements)
+    # and must stay silent: anchoring is traceability, not a finding.
+    monkeypatch.setattr(llm_classifier, "classify_changes_batch", lambda items, *a, **k: [])
+
+    old_paragraphs = [
+        Paragraph(text="1.0 Scope", paragraph_index=0, is_heading=True),
+        Paragraph(text="Applies to all batches.", paragraph_index=1),
+        Paragraph(text="Text Box 1 (1.0 Scope, after paragraph 1)", paragraph_index=2, is_heading=True),
+        Paragraph(text="CAUTION: verify calibration.", paragraph_index=3),
+    ]
+    new_paragraphs = [
+        Paragraph(text="1.0 Scope", paragraph_index=0, is_heading=True),
+        Paragraph(text="Applies to all batches.", paragraph_index=1),
+        Paragraph(text="Text Box 1 (2.0 Responsibilities, after paragraph 1)", paragraph_index=2, is_heading=True),
+        Paragraph(text="CAUTION: verify calibration.", paragraph_index=3),
+    ]
+
+    result = pipeline.compare_documents(old_paragraphs, new_paragraphs, "v1.docx", "v2.docx")
+
+    assert [c for c in result.changes if c.change_type == "section_heading_changed"] == []

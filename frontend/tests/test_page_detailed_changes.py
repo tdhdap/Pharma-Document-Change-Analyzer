@@ -119,7 +119,7 @@ def test_page_table_category_shows_row_col_columns_1_indexed():
     matching = [df for df in table_values if "Row" in df.columns]
     assert len(matching) == 1
     df = matching[0]
-    assert list(df.columns) == ["Row", "Col", "Old Text", "New Text", "Change Type", "Risk", "Reason"]
+    assert list(df.columns) == ["Row", "Col", "Old Text", "New Text", "Change Type", "Match", "Risk", "Reason"]
     # old_table_position/new_table_position both have row=1, col=2 (0-indexed) -> displayed 1-indexed.
     assert df.iloc[0]["Row"] == "2"
     assert df.iloc[0]["Col"] == "3"
@@ -263,3 +263,30 @@ def test_page_has_no_blank_section_filter_entry_for_structural_rows():
     section_options = at.selectbox[1].options  # "Filter by section" is the second selectbox
     assert "" not in section_options
     assert "Table 1" in section_options
+
+
+def test_page_shows_match_score_only_for_matched_rows():
+    changes = [
+        {
+            "change_id": "m1", "section": "2.0 Scope", "source": "Body",
+            "change_type": "section_heading_changed",
+            "old_text": "2.0 Scope", "new_text": "2.0 Applicability",
+            "confidence": 0.893, "ai_risk_level": "Medium", "reviewer_risk_level": None,
+            "reason": "Section heading changed.",
+        },
+        {
+            "change_id": "m2", "section": "9.0 Training", "source": "Body",
+            "change_type": "section_added",
+            "old_text": "", "new_text": "9.0 Training",
+            "confidence": 1.0, "ai_risk_level": "High", "reviewer_risk_level": None,
+            "reason": "Section added.",
+        },
+    ]
+
+    at = _run_page_with(changes)
+
+    assert not at.exception
+    rendered = [df.value for df in at.get("table")]
+    match_values = [v for df in rendered for v in df["Match"].tolist()]
+    assert "0.89" in match_values
+    assert "" in match_values

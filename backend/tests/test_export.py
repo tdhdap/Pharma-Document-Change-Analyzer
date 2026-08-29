@@ -56,29 +56,45 @@ def test_to_csv_has_header_and_one_row_per_change():
     assert rows[1][0] == "ch-1"
 
 
-def test_to_json_includes_structural_counts():
-    changes = [
-        Change(
-            change_id="ch-1", section="9.0 Training", change_type="section_added",
-            old_text="", new_text="9.0 Training", old_page=None, new_page=None,
-            confidence=1.0, ai_risk_level="High", reason="Section added.",
-        ),
-        Change(
-            change_id="ch-2", section="4.0 Approval", change_type="section_reordered",
-            old_text="4.0 Approval", new_text="4.0 Approval", old_page=None, new_page=None,
-            confidence=0.86, ai_risk_level="Informational", reason="Section moved.",
-        ),
-    ]
+def _structural_change(index: int, change_type: str) -> Change:
+    return Change(
+        change_id=f"ch-{index}", section="s", change_type=change_type,
+        old_text="o", new_text="n", old_page=None, new_page=None,
+        confidence=1.0, ai_risk_level="Informational", reason="r",
+    )
+
+
+def test_to_json_includes_every_structural_count():
+    # Every count is DISTINCT and non-zero on purpose. With two metrics sharing a
+    # value, a key wired to the wrong field passes; with a count of zero, the
+    # assertion is near-tautological. to_json is the only path these numbers take
+    # to the page, and the page's .get(name, 0) turns a dropped or crossed key into
+    # a silent, plausible 0 on a regulated report rather than a crash.
+    counts = {
+        "section_added": 1,
+        "section_deleted": 2,
+        "section_heading_changed": 3,
+        "section_renumbered": 4,
+        "section_renumbered_cascade": 5,
+        "section_reordered": 6,
+    }
+    changes = []
+    for change_type, total in counts.items():
+        for _ in range(total):
+            changes.append(_structural_change(len(changes), change_type))
     comparison = ComparisonResult(
         comparison_id="CMP-002", old_document="v1.docx", new_document="v2.docx",
         summary=build_summary(changes), changes=changes,
     )
 
-    result = to_json(comparison)
+    summary = to_json(comparison)["summary"]
 
-    assert result["summary"]["sections_added"] == 1
-    assert result["summary"]["sections_moved"] == 1
-    assert result["summary"]["sections_cascaded"] == 0
+    assert summary["sections_added"] == 1
+    assert summary["sections_deleted"] == 2
+    assert summary["sections_renamed"] == 3
+    assert summary["sections_renumbered"] == 4
+    assert summary["sections_cascaded"] == 5
+    assert summary["sections_moved"] == 6
 
 
 def test_to_json_includes_source_field():

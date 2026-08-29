@@ -2,7 +2,7 @@ import streamlit as st
 
 from logic import (
     filter_changes, group_changes_for_display, format_group_label, has_high_risk,
-    format_table_coordinates, table_group_key,
+    format_table_coordinates, table_group_key, format_match_confidence,
 )
 from bootstrap import ensure_backend_running
 
@@ -41,6 +41,7 @@ else:
                 "Old Text": c["old_text"],
                 "New Text": c["new_text"],
                 "Change Type": c["change_type"],
+                "Match": format_match_confidence(c),
                 "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
                 "Reason": c["reason"],
             }
@@ -53,6 +54,7 @@ else:
                 "Old Text": c["old_text"],
                 "New Text": c["new_text"],
                 "Change Type": c["change_type"],
+                "Match": format_match_confidence(c),
                 "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
                 "Reason": c["reason"],
             }
@@ -74,6 +76,7 @@ else:
                     "Old Text": c["old_text"],
                     "New Text": c["new_text"],
                     "Change Type": c["change_type"],
+                    "Match": format_match_confidence(c),
                     "Risk": c.get("reviewer_risk_level") or c["ai_risk_level"],
                     "Reason": c["reason"],
                 })

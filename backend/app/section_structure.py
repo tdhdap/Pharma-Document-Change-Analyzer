@@ -2,7 +2,14 @@ import re
 import uuid
 
 from app import risk_rules
+from app.embeddings import cosine_similarity_matrix, embed_texts
 from app.models import Change, Paragraph, Section, SectionMatch
+
+# Below this, two headings are different enough that pairing their sections was a
+# judgment call made on body content, and the reviewer is told so. Chosen from
+# measured separation: real rewrites scored 0.106-0.759, trivial edits
+# (pluralisation, "and"->"&", "Scope"->"Scope and Purpose") scored 0.831-0.976.
+HEADING_REWRITE_SIMILARITY_THRESHOLD = 0.85
 
 _HEADING_NUMBER_PATTERN = re.compile(r"^(?P<num>\d+(?:\.\d+)*)\s+(?P<rest>.*)$")
 
@@ -12,6 +19,38 @@ def _split_heading_number(heading: str) -> tuple[str, str] | None:
     if not match:
         return None
     return match.group("num"), " ".join(match.group("rest").split())
+
+
+def _heading_text_without_number(heading: str) -> str:
+    split = _split_heading_number(heading)
+    return split[1] if split is not None else " ".join(heading.split())
+
+
+def _heading_rewrite_similarity(old_heading: str, new_heading: str) -> float:
+    # Compare the headings WITHOUT their numbers. With the number left in, a pure
+    # renumber ('4.0 Approval' -> '2.0 Approval') scores 0.782 while a genuine
+    # rewrite ('Equipment Qualification' -> 'Qualifying the Equipment') scores
+    # 0.869 - the number inverts the signal. Stripped, renumbers land at exactly
+    # 1.000 and the rewrites fall to 0.288 and 0.759.
+    old_rest = _heading_text_without_number(old_heading)
+    new_rest = _heading_text_without_number(new_heading)
+    if old_rest == new_rest:
+        return 1.0
+    return float(cosine_similarity_matrix(
+        embed_texts([old_rest]), embed_texts([new_rest])
+    )[0][0])
+
+
+def _is_top_level_numbered(heading: str) -> bool:
+    # Only a top-level insertion or deletion shifts top-level numbers, and
+    # actual_shift compares only the first component - so the expected-shift
+    # count has to match that. A sub-section like "2.1 Calibration" shifts
+    # nothing at the top level and must not be counted.
+    split = _split_heading_number(heading)
+    if split is None:
+        return False
+    parts = split[0].split(".")
+    return all(int(part) == 0 for part in parts[1:])
 
 
 def detect_section_renumbering(
@@ -45,11 +84,11 @@ def detect_section_renumbering(
         # so this over-reports rather than hides.
         inserted_above = sum(
             1 for i in inserted_indices
-            if i < m.new_index and _split_heading_number(new_sections[i].heading) is not None
+            if i < m.new_index and _is_top_level_numbered(new_sections[i].heading)
         )
         deleted_above = sum(
             1 for i in deleted_indices
-            if i < m.old_index and _split_heading_number(old_sections[i].heading) is not None
+            if i < m.old_index and _is_top_level_numbered(old_sections[i].heading)
         )
         expected_shift = inserted_above - deleted_above
         try:
@@ -60,14 +99,20 @@ def detect_section_renumbering(
             change_type = "section_renumbered_cascade"
             count = abs(expected_shift)
             verb = "added" if expected_shift > 0 else "removed"
-            reason = (
+            base = (
                 f"Section renumbered from '{old_num}' to '{new_num}' as a side effect of "
-                f"{count} section{'' if count == 1 else 's'} {verb} above it; wording unchanged."
+                f"{count} section{'' if count == 1 else 's'} {verb} above it"
             )
+            # Only claim the wording is unchanged when it actually is - the row's
+            # own new_text would otherwise contradict its own reason.
+            if old_split[1] == new_split[1]:
+                reason = f"{base}; wording unchanged."
+            else:
+                reason = f"{base}."
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
-            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            confidence=m.score, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source="Body",
         ))
     return changes
@@ -110,14 +155,18 @@ def _is_page_header_or_footer_heading(heading: str) -> bool:
     return bool(_PAGE_HEADER_FOOTER_PATTERN.match(heading))
 
 
-_TEXT_BOX_PATTERN = re.compile(r"^Text Box \d+$")
+# The optional group tolerates the location anchor the label carries (e.g.
+# "Text Box 1 (4.0 Procedure, paragraph 2)"). Without it, every anchored label
+# whose section or position differed between versions would emit a spurious
+# section_heading_changed row - verified: two pipeline tests fail without this.
+_TEXT_BOX_PATTERN = re.compile(r"^Text Box \d+(\s\(.+\))?$")
 
 
 def _is_text_box_heading(heading: str) -> bool:
     return bool(_TEXT_BOX_PATTERN.match(heading))
 
 
-_FOOTNOTE_PATTERN = re.compile(r"^Footnote \d+$")
+_FOOTNOTE_PATTERN = re.compile(r"^Footnote \d+(\s\(.+\))?$")
 
 
 def _is_footnote_heading(heading: str) -> bool:
@@ -152,7 +201,7 @@ def detect_section_reordering(
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
-            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
+            confidence=m.score, ai_risk_level=risk_rules.assign_risk(change_type),
             reason=reason, source="Body",
         ))
     return changes
@@ -276,11 +325,21 @@ def detect_section_heading_changed(
             if old_rest == new_rest:
                 continue
         change_type = "section_heading_changed"
+        reason = f"Section heading changed from '{old_heading}' to '{new_heading}'."
+        # Only say this where the pairing was genuinely a judgment call. The whole
+        # point is that the overall match score cannot reveal it: a rewrite scored
+        # 0.976 and a pure renumber 0.979 on the real corpus.
+        similarity = _heading_rewrite_similarity(old_heading, new_heading)
+        if similarity < HEADING_REWRITE_SIMILARITY_THRESHOLD:
+            reason += (
+                f" Headings differ substantially (similarity {similarity:.2f}); "
+                "sections matched on content."
+            )
         changes.append(Change(
             change_id=str(uuid.uuid4()), section=old_heading, change_type=change_type,
             old_text=old_heading, new_text=new_heading, old_page=None, new_page=None,
-            confidence=1.0, ai_risk_level=risk_rules.assign_risk(change_type),
-            reason=f"Section heading changed from '{old_heading}' to '{new_heading}'.",
+            confidence=m.score, ai_risk_level=risk_rules.assign_risk(change_type),
+            reason=reason,
             source="Body",
         ))
     return changes

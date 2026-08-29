@@ -2,7 +2,7 @@ from logic import (
     filter_changes, build_change_update_payload, format_table_cell,
     categorize_change, group_changes_for_display, compute_risk_counts,
     format_group_label, has_high_risk, format_table_coordinates, table_group_key,
-)
+ format_match_confidence,)
 
 CHANGES = [
     {"change_id": "1", "section": "Acceptance Criteria", "change_type": "numeric_change", "ai_risk_level": "High", "reviewer_risk_level": None},
@@ -349,3 +349,23 @@ def test_table_group_key_survives_a_missing_position():
         "old_table_position": None, "new_table_position": None,
     }
     assert table_group_key(change) == -1
+
+
+def test_format_match_confidence_shows_the_score_for_matched_rows():
+    for change_type in (
+        "section_heading_changed", "section_renumbered", "section_renumbered_cascade",
+        "section_reordered", "moved_paragraph", "moved_table_content",
+    ):
+        assert format_match_confidence({"change_type": change_type, "confidence": 0.893}) == "0.89"
+
+
+def test_format_match_confidence_is_blank_where_nothing_was_matched():
+    # An added or deleted section was never matched, so there is no score. A regex
+    # or LLM row's confidence is a different metric entirely and must not appear
+    # in a column labelled Match.
+    for change_type in ("section_added", "section_deleted", "numeric_change", "table_row_added"):
+        assert format_match_confidence({"change_type": change_type, "confidence": 1.0}) == ""
+
+
+def test_format_match_confidence_survives_a_missing_confidence():
+    assert format_match_confidence({"change_type": "section_reordered"}) == ""
